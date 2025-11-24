@@ -1,0 +1,7 @@
+{
+  "name": "BlockMaster Nigeria",
+  "description": "A professional floor plan sketching tool tailored for the Nigerian construction industry. Sketch layouts, deduct openings, and accurately calculate sandcrete hollow blocks, cement, and sand requirements with AI-powered insights.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
