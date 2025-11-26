@@ -1,6 +1,6 @@
 
-import { Wall, Opening, ProjectSettings, CalculationResult, Column, SafetyReport, SafetyStatus, SafetyIssue } from '../types';
-import { distance, calculateFloorArea, buildGraph } from './geometry';
+import { Wall, Opening, ProjectSettings, CalculationResult, Column, SafetyReport, SafetyStatus, SafetyIssue, Beam, Slab } from '../types';
+import { distance, calculateFloorArea, buildGraph, calculatePolygonArea } from './geometry';
 
 // CONSTANTS
 const SCALE = 0.05; // Must match Canvas scale for decoding length
@@ -121,7 +121,7 @@ const analyzeStructuralSafety = (columns: Column[], walls: Wall[], settings: Pro
                     value: spanM,
                     limit: 4.5
                 });
-                if (status !== 'critical') status = 'warning';
+                status = 'warning';
             }
         }
 
@@ -196,6 +196,8 @@ export const calculateEstimates = (
     walls: Wall[],
     openings: Opening[],
     columns: Column[],
+    beams: Beam[],
+    slabs: Slab[],
     settings: ProjectSettings
 ): CalculationResult => {
 
@@ -224,16 +226,27 @@ export const calculateEstimates = (
     let overlapLengthCorrection = 0;
     const wallThicknessM = (settings.blockThickness || 225) / 1000;
 
+    // DEBUG: Log corner correction
+    console.log('🔧 Corner Correction Debug:');
+    console.log(`  Total nodes: ${nodes.length}`);
+
     nodes.forEach(node => {
         const degree = node.edges.length;
         if (degree > 1) {
             // For k walls meeting, we subtract (k-1) overlaps
             // Assuming 90 degree intersections, overlap length is Thickness
-            overlapLengthCorrection += (degree - 1) * wallThicknessM;
+            const nodeOverlap = (degree - 1) * wallThicknessM;
+            overlapLengthCorrection += nodeOverlap;
+            console.log(`  Node deg=${degree}: overlap=${nodeOverlap.toFixed(3)}m`);
         }
     });
 
+    console.log(`  Total overlap correction: ${overlapLengthCorrection.toFixed(3)}m`);
+    console.log(`  Before: ${totalWallLengthMeters.toFixed(2)}m`);
+
     const correctedWallLength = Math.max(0, totalWallLengthMeters - overlapLengthCorrection);
+    console.log(`  After: ${correctedWallLength.toFixed(2)}m`);
+
     const totalWallArea = correctedWallLength * (settings.wallHeightDefault / 1000); // m^2
     const netArea = Math.max(0, totalWallArea - totalOpeningArea);
 
@@ -399,6 +412,54 @@ export const calculateEstimates = (
     // --- Safety Analysis ---
     const safetyReport = analyzeStructuralSafety(columns, walls, settings);
 
+    // --- Beam Calculations ---
+    let beamConcreteVolume = 0;
+    let beamReinforcementMain = 0;
+    let beamReinforcementStirrup = 0;
+    let beamStirrupCountTotal = 0;
+
+    beams.forEach(beam => {
+        const lenMm = distance(beam.start, beam.end) / SCALE;
+        const lenM = lenMm / 1000;
+        const wM = beam.width / 1000;
+        const dM = beam.depth / 1000;
+
+        // Volume
+        beamConcreteVolume += lenM * wM * dM;
+
+        // Reinforcement
+        const barCount = 4; // Default
+        beamReinforcementMain += lenM * barCount;
+
+        const stirrupSpacing = 0.2; // 200mm
+        const stirrupCount = Math.ceil(lenM / stirrupSpacing);
+        beamStirrupCountTotal += stirrupCount;
+
+        const perimeter = (wM + dM) * 2;
+        beamReinforcementStirrup += stirrupCount * perimeter;
+    });
+
+    // --- Slab Calculations ---
+    let slabAreaTotal = 0;
+    let slabConcreteVolume = 0;
+    let slabReinforcementMain = 0;
+
+    slabs.forEach(slab => {
+        const areaPx = calculatePolygonArea(slab.points);
+        // Convert px^2 to mm^2: px * (1/SCALE) * px * (1/SCALE)
+        const areaMm = areaPx * (1 / SCALE) * (1 / SCALE);
+        const areaM = areaMm / 1000000;
+
+        slabAreaTotal += areaM;
+
+        const thicknessM = (slab.thickness || 150) / 1000;
+        slabConcreteVolume += areaM * thicknessM;
+
+        // Reinforcement Estimation (Mesh)
+        const reinforcementFactor = 12; // m of bar per m2 (approx)
+        slabReinforcementMain += areaM * reinforcementFactor;
+    });
+
     return {
         totalWallArea,
         totalOpeningArea,
@@ -419,7 +480,23 @@ export const calculateEstimates = (
             stirrupCount: colStirrupCountTotal
         },
 
-        // Mortar
+        // Beam Results
+        beamConcreteVolume,
+        beamReinforcement: {
+            mainLength: beamReinforcementMain,
+            stirrupLength: beamReinforcementStirrup,
+            stirrupCount: beamStirrupCountTotal
+        },
+
+        // Slab Results
+        slabArea: slabAreaTotal,
+        slabConcreteVolume,
+        slabReinforcement: {
+            mainLength: slabReinforcementMain,
+            topLength: 0 // Placeholder for now
+        },
+
+        // --- Mortar
         mortarVolume: totalMortarVolume * materialWastage,
         cementBags,
         sandTons,

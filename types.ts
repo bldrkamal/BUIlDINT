@@ -42,6 +42,22 @@ export interface Column {
   label?: string; // e.g. "C1"
 }
 
+export interface Beam {
+  id: string;
+  start: Point;
+  end: Point;
+  width: number; // mm
+  depth: number; // mm
+  label?: string; // e.g. "B1"
+}
+
+export interface Slab {
+  id: string;
+  points: Point[]; // Polygon vertices
+  thickness: number; // mm
+  label?: string; // e.g. "S1"
+}
+
 export interface SectionLine {
   id: string;
   start: Point;
@@ -87,6 +103,7 @@ export interface ProjectSettings {
 
   sections?: SectionLine[]; // Array of defined section lines
   showSafetyWarnings?: boolean; // Toggle for structural safety overlays
+  showTributaryAreas?: boolean; // Toggle for tributary area visualization
 }
 
 export interface ToolSettings {
@@ -98,7 +115,7 @@ export interface ToolSettings {
   columnHeight: number; // mm
 }
 
-export type ToolMode = 'select' | 'wall' | 'door' | 'window' | 'column' | 'eraser' | 'pan' | 'text' | 'section';
+export type ToolMode = 'select' | 'wall' | 'door' | 'window' | 'column' | 'beam' | 'slab' | 'eraser' | 'pan' | 'text' | 'section';
 
 export interface CalculationResult {
   totalWallArea: number; // sq meters
@@ -141,6 +158,22 @@ export interface CalculationResult {
     sandTons: number;
     aggregateTons: number;
   };
+  // Beam Results
+  beamConcreteVolume: number;
+  beamReinforcement: {
+    mainLength: number;
+    stirrupLength: number;
+    stirrupCount: number;
+  };
+
+  // Slab Results
+  slabArea: number;
+  slabConcreteVolume: number;
+  slabReinforcement: {
+    mainLength: number; // Bottom X+Y
+    topLength: number; // Top X+Y (Distribution)
+  };
+
   safetyReport?: SafetyReport;
 }
 
@@ -170,6 +203,7 @@ export interface ViewportTransform {
 }
 
 export interface SnapGuide {
+  type?: 'alignment' | 'extension';
   orientation: 'vertical' | 'horizontal';
   position: number; // x or y value
   refPoint: Point; // The point on the existing map we are aligning to
@@ -223,7 +257,15 @@ export interface GNNEdge {
     openingArea: number; // m2 (Reduces wall mass)
     hasDoor: number; // 0 or 1
     hasWindow: number; // 0 or 1
+    isBeam: number; // 0 or 1
   };
+}
+
+export interface GNNSlab {
+  id: string;
+  area: number; // m2
+  thickness: number; // m
+  centroid: { x: number, y: number }; // normalized
 }
 
 export interface GNNSemanticLabel {
@@ -235,6 +277,7 @@ export interface GNNSemanticLabel {
 export interface GNNData {
   nodes: GNNNode[];
   edges: GNNEdge[];
+  slabs: GNNSlab[];
   adjacencyList: [number, number][]; // [Source, Target] pairs for PyTorch Geometric
   semanticLabels: GNNSemanticLabel[]; // Context for Cost Prediction
   globalFeatures: {
@@ -250,6 +293,8 @@ export interface ProjectData {
     walls: Wall[];
     openings: Opening[];
     columns: Column[];
+    beams: Beam[];
+    slabs: Slab[];
     labels?: ProjectLabel[];
   };
   gnnReady?: GNNData; // Compiled Graph Data for AI Training

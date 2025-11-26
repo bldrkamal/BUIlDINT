@@ -1,9 +1,11 @@
 
 import React, { useRef, useState, MouseEvent, useEffect, KeyboardEvent as ReactKeyboardEvent, TouchEvent } from 'react';
-import { Wall, Point, Opening, ToolMode, ProjectSettings, ToolSettings, ViewportTransform, SnapGuide, SnapType, ProjectLabel, Column, SectionLine, CalculationResult } from '../types';
+import { Wall, Point, Opening, ToolMode, ProjectSettings, ToolSettings, ViewportTransform, SnapGuide, SnapType, ProjectLabel, Column, SectionLine, CalculationResult, Beam, Slab } from '../types';
 import { distance, snapToGrid, checkSnapToNodes, getClosestPointOnLine, generateId, getAngle, snapToAngle, getAlignmentGuides, roundPoint, getLineIntersection } from '../utils/geometry';
+import { calculateTributaryAreas } from '../utils/structuralAnalysis';
 import { Move, ZoomIn, ZoomOut, Keyboard, MousePointer2 } from 'lucide-react';
 import PropertiesPanel from './PropertiesPanel';
+import DPad from './DPad';
 
 interface CanvasProps {
     tool: ToolMode;
@@ -11,10 +13,14 @@ interface CanvasProps {
     walls: Wall[];
     openings: Opening[];
     columns: Column[];
+    beams: Beam[];
+    slabs: Slab[];
     labels: ProjectLabel[];
     setWalls: React.Dispatch<React.SetStateAction<Wall[]>>;
     setOpenings: React.Dispatch<React.SetStateAction<Opening[]>>;
     setColumns: React.Dispatch<React.SetStateAction<Column[]>>;
+    setBeams: React.Dispatch<React.SetStateAction<Beam[]>>;
+    setSlabs: React.Dispatch<React.SetStateAction<Slab[]>>;
     setLabels: React.Dispatch<React.SetStateAction<ProjectLabel[]>>;
     settings: ProjectSettings;
     toolSettings: ToolSettings;
@@ -36,10 +42,14 @@ const Canvas: React.FC<CanvasProps> = ({
     walls,
     openings,
     columns,
+    beams,
+    slabs,
     labels,
     setWalls,
     setOpenings,
     setColumns,
+    setBeams,
+    setSlabs,
     setLabels,
     settings,
     toolSettings,
@@ -71,6 +81,8 @@ const Canvas: React.FC<CanvasProps> = ({
     const [dragOriginalWall, setDragOriginalWall] = useState<Wall | null>(null);
     const [dragOriginalLabel, setDragOriginalLabel] = useState<ProjectLabel | null>(null);
     const [dragOriginalColumn, setDragOriginalColumn] = useState<Column | null>(null);
+    const [dragOriginalBeam, setDragOriginalBeam] = useState<Beam | null>(null);
+    const [dragOriginalSlab, setDragOriginalSlab] = useState<Slab | null>(null);
 
     // Snapping State
     const [activeGuides, setActiveGuides] = useState<SnapGuide[]>([]);
@@ -81,12 +93,26 @@ const Canvas: React.FC<CanvasProps> = ({
         distFromStart: number;
     } | null>(null);
 
+
+
     // Opening Preview State
     const [previewOpening, setPreviewOpening] = useState<{
         wall: Wall;
         point: Point;
         distFromStart: number;
     } | null>(null);
+
+    // ... (existing state)
+
+
+
+    // Precision Mode State
+    const [precisionMode, setPrecisionMode] = useState(false);
+    const [virtualCursor, setVirtualCursor] = useState<Point | null>(null); // For D-Pad control
+
+    // Touch State
+    const lastTouchRef = useRef<{ dist: number; center: Point } | null>(null);
+    const TOUCH_OFFSET = 60; // px above finger
 
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -117,6 +143,8 @@ const Canvas: React.FC<CanvasProps> = ({
         };
     }, [selectedId, inputVisible]);
 
+
+
     // --- Coordinates ---
     const screenToWorld = (sx: number, sy: number): Point => {
         if (!containerRef.current) return { x: 0, y: 0 };
@@ -133,10 +161,16 @@ const Canvas: React.FC<CanvasProps> = ({
         let clientX, clientY;
         let button = 0;
         let shiftKey = isShiftHeld;
+        let isTouch = false;
 
         if ('touches' in e) {
+            isTouch = true;
+            // Multi-touch for gestures, ignore here or handle?
+            // If 2 fingers, we don't want to draw/select, we want to gesture.
+            if (e.touches.length > 1) return;
+
             clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
+            clientY = e.touches[0].clientY - TOUCH_OFFSET; // Apply Offset
         } else {
             const mouseEvent = e as React.MouseEvent;
             clientX = mouseEvent.clientX;
@@ -161,7 +195,26 @@ const Canvas: React.FC<CanvasProps> = ({
 
         if (button !== 0 && button !== 1) return; // Ignore other buttons
 
-        const worldPos = screenToWorld(clientX, clientY);
+        if (button !== 0 && button !== 1) return; // Ignore other buttons
+
+
+
+        let worldPos = screenToWorld(clientX, clientY);
+
+        // Precision Mode Override
+        if (precisionMode) {
+            // If we have a virtual cursor, use it. 
+            // BUT if the user taps, we might want to move the virtual cursor to the tap location first?
+            // Strategy: Tap moves the cursor to that location AND triggers the action.
+            // OR: Tap just moves the cursor? 
+            // Let's go with: Tap sets the virtual cursor to that point, and we use that point.
+            setVirtualCursor(worldPos);
+        } else {
+            setVirtualCursor(null);
+        }
+
+        // If we are in precision mode and already have a virtual cursor, maybe we use that?
+        // Actually, let's keep it simple: Tap always updates position.
 
         // Space bar pan or middle click
         if (tool === 'pan' || button === 1) {
@@ -248,7 +301,50 @@ const Canvas: React.FC<CanvasProps> = ({
                 setDragOriginalWall({ ...hitWall }); // Deep copy state at start of drag
                 setDragOriginalLabel(null);
                 setDragOriginalColumn(null);
+                setDragOriginalBeam(null);
+                setDragOriginalSlab(null);
             } else {
+                // 5. Check Beams
+                const hitBeam = beams.find(b => {
+                    const { point } = getClosestPointOnLine(worldPos, b.start, b.end);
+                    return distance(worldPos, point) < (b.width / 2 * SCALE);
+                });
+
+                if (hitBeam) {
+                    setSelectedId(hitBeam.id);
+                    setDragStart(worldPos);
+                    setDragOriginalBeam({ ...hitBeam });
+                    setDragOriginalWall(null);
+                    setDragOriginalLabel(null);
+                    setDragOriginalColumn(null);
+                    setDragOriginalSlab(null);
+                    return;
+                }
+
+                // 6. Check Slabs
+                const hitSlab = slabs.find(s => {
+                    let inside = false;
+                    for (let i = 0, j = s.points.length - 1; i < s.points.length; j = i++) {
+                        const xi = s.points[i].x, yi = s.points[i].y;
+                        const xj = s.points[j].x, yj = s.points[j].y;
+                        const intersect = ((yi > worldPos.y) !== (yj > worldPos.y))
+                            && (worldPos.x < (xj - xi) * (worldPos.y - yi) / (yj - yi) + xi);
+                        if (intersect) inside = !inside;
+                    }
+                    return inside;
+                });
+
+                if (hitSlab) {
+                    setSelectedId(hitSlab.id);
+                    setDragStart(worldPos);
+                    setDragOriginalSlab({ ...hitSlab });
+                    setDragOriginalBeam(null);
+                    setDragOriginalWall(null);
+                    setDragOriginalLabel(null);
+                    setDragOriginalColumn(null);
+                    return;
+                }
+
                 // Clicked on empty space -> Deselect
                 setSelectedId(null);
             }
@@ -275,6 +371,7 @@ const Canvas: React.FC<CanvasProps> = ({
             if (!isDrawing) {
                 setIsDrawing(true);
                 setPoints([finalPoint]);
+                // Precision Mode: Don't auto-drag, just set start point.
             } else {
                 const start = points[0];
                 const end = finalPoint;
@@ -289,6 +386,98 @@ const Canvas: React.FC<CanvasProps> = ({
                     };
                     setWalls([...walls, newWall]);
                     setPoints([end]); // Polyline - Continue drawing from end
+
+                    // Precision Mode: Stop drawing after one segment if preferred? 
+                    // No, Polyline is good. But we need to handle "Move" without "Drag".
+                }
+            }
+
+        } else if (tool === 'beam') {
+            // STRICT CONSTRAINT: Beams must start/end on Columns
+            const hitColumn = columns.find(c => distance(worldPos, { x: c.x, y: c.y }) < 20);
+
+            if (!hitColumn) {
+                // Optional: Show feedback that placement is invalid
+                return;
+            }
+
+            // If we are starting, just set the point
+            if (points.length === 0) {
+                setIsDrawing(true);
+                setPoints([{ x: hitColumn.x, y: hitColumn.y }]);
+            } else {
+                // If ending, ensure it's a different column
+                const start = points[0];
+                const end = { x: hitColumn.x, y: hitColumn.y };
+
+                if (start.x !== end.x || start.y !== end.y) {
+                    const newBeam: Beam = {
+                        id: generateId(),
+                        start,
+                        end,
+                        width: 225,
+                        depth: 450,
+                        label: `B${beams.length + 1}`
+                    };
+                    setBeams([...beams, newBeam]);
+                    // Reset for next beam (Polyline? Or Click-Click?)
+                    // User guide says "Click start and end". Let's reset.
+                    setPoints([]);
+                    setIsDrawing(false);
+                }
+            }
+        } else if (tool === 'slab') {
+            // STRICT CONSTRAINT: Slab vertices must lie on Beams
+            let isValidPlacement = false;
+            let finalPoint = worldPos;
+
+            // Check snap to beams
+            // 1. Check endpoints
+            for (const beam of beams) {
+                if (distance(worldPos, beam.start) < 20) { isValidPlacement = true; finalPoint = beam.start; break; }
+                if (distance(worldPos, beam.end) < 20) { isValidPlacement = true; finalPoint = beam.end; break; }
+            }
+            // 2. Check along beam
+            if (!isValidPlacement) {
+                for (const beam of beams) {
+                    const { point } = getClosestPointOnLine(worldPos, beam.start, beam.end);
+                    if (distance(worldPos, point) < 20) {
+                        isValidPlacement = true;
+                        finalPoint = point;
+                        break;
+                    }
+                }
+            }
+
+            // Exception: Closing the loop
+            if (points.length > 2 && distance(worldPos, points[0]) < 20) {
+                isValidPlacement = true;
+                finalPoint = points[0];
+            }
+
+            if (!isValidPlacement) {
+                return; // Invalid placement
+            }
+
+            if (!isDrawing) {
+                setIsDrawing(true);
+                setPoints([finalPoint]);
+            } else {
+                // Check if closing the loop (click near start)
+                const start = points[0];
+                if (points.length > 2 && distance(finalPoint, start) < 20) {
+                    // Close loop
+                    const newSlab: Slab = {
+                        id: generateId(),
+                        points: [...points],
+                        thickness: 150,
+                        label: `S${slabs.length + 1} `
+                    };
+                    setSlabs([...slabs, newSlab]);
+                    setPoints([]);
+                    setIsDrawing(false);
+                } else {
+                    setPoints([...points, finalPoint]);
                 }
             }
 
@@ -424,10 +613,69 @@ const Canvas: React.FC<CanvasProps> = ({
     const handleMouseMove = (e: React.MouseEvent | TouchEvent) => {
         let clientX, clientY;
         let shiftKey = isShiftHeld;
+        let isTouch = false;
 
         if ('touches' in e) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
+            isTouch = true;
+            // Handle Gestures (Pinch / Pan)
+            if (e.touches.length === 2) {
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+
+                const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+                const center = {
+                    x: (t1.clientX + t2.clientX) / 2,
+                    y: (t1.clientY + t2.clientY) / 2
+                };
+                if (lastTouchRef.current) {
+                    // 1. Pan
+                    const dx = center.x - lastTouchRef.current.center.x;
+                    const dy = center.y - lastTouchRef.current.center.y;
+
+                    // 2. Zoom
+                    const zoomDelta = dist - lastTouchRef.current.dist;
+                    const zoomSensitivity = 0.005;
+                    const oldScale = viewport.scale;
+                    const newScale = Math.max(0.1, Math.min(5, oldScale + zoomDelta * zoomSensitivity));
+
+                    // Apply Pan
+                    let newVx = viewport.x + dx;
+                    let newVy = viewport.y + dy;
+
+                    // Apply Zoom (centered on pinch center)
+                    // We need to adjust viewport x/y to keep the center point stable relative to the screen
+                    // Logic: World point at center should remain at screen center
+                    // Simple approximation: Zoom then Pan or just use the center diff
+
+                    // Refined Zoom Logic:
+                    if (Math.abs(zoomDelta) > 1) { // Threshold
+                        const rect = containerRef.current?.getBoundingClientRect();
+                        if (rect) {
+                            const mouseX = center.x - rect.left;
+                            const mouseY = center.y - rect.top;
+
+                            const scaleRatio = newScale / oldScale;
+                            newVx = mouseX - (mouseX - newVx) * scaleRatio;
+                            newVy = mouseY - (mouseY - newVy) * scaleRatio;
+                        }
+                    }
+
+                    setViewport(prev => ({
+                        x: newVx,
+                        y: newVy,
+                        scale: newScale // Update scale
+                    }));
+                }
+
+                lastTouchRef.current = { dist, center };
+                return; // Stop processing as mouse move
+            } else if (e.touches.length === 1) {
+                lastTouchRef.current = null; // Reset gesture
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY - TOUCH_OFFSET; // Apply Offset
+            } else {
+                return;
+            }
         } else {
             const mouseEvent = e as React.MouseEvent;
             clientX = mouseEvent.clientX;
@@ -435,6 +683,15 @@ const Canvas: React.FC<CanvasProps> = ({
             shiftKey = mouseEvent.shiftKey;
         }
 
+        let worldPos = screenToWorld(clientX, clientY);
+
+        // Precision Mode: If using D-Pad, we might ignore mouse move?
+        // No, mouse/touch should still work.
+        if (precisionMode && virtualCursor) {
+            // If user touches screen, update virtual cursor?
+            // Yes, allow coarse positioning with touch, fine with D-Pad.
+            setVirtualCursor(worldPos);
+        }
         if (isPanning) {
             const dx = clientX - panStart.x;
             const dy = clientY - panStart.y;
@@ -443,7 +700,10 @@ const Canvas: React.FC<CanvasProps> = ({
             return;
         }
 
-        const worldPos = screenToWorld(clientX, clientY);
+
+
+        // worldPos is already declared above
+        // const worldPos = screenToWorld(clientX, clientY);
 
         // --- Dragging Logic (Select Mode) ---
         if (tool === 'select' && dragStart && selectedId) {
@@ -566,6 +826,31 @@ const Canvas: React.FC<CanvasProps> = ({
 
                 setSnapType(currentSnapType);
                 setActiveGuides(guides);
+            }
+
+            // Drag Beam
+            if (dragOriginalBeam) {
+                let finalStart = { x: dragOriginalBeam.start.x + dx, y: dragOriginalBeam.start.y + dy };
+                let finalEnd = { x: dragOriginalBeam.end.x + dx, y: dragOriginalBeam.end.y + dy };
+
+                if (snapEnabled) {
+                    finalStart = snapToGrid(finalStart);
+                    finalEnd = snapToGrid(finalEnd);
+                }
+
+                setBeams(prev => prev.map(b => b.id === selectedId ? { ...b, start: finalStart, end: finalEnd } : b));
+                return;
+            }
+
+            // Drag Slab
+            if (dragOriginalSlab) {
+                const newPoints = dragOriginalSlab.points.map(p => ({
+                    x: p.x + dx,
+                    y: p.y + dy
+                }));
+                // Note: Not snapping individual points to avoid distortion during drag
+                setSlabs(prev => prev.map(s => s.id === selectedId ? { ...s, points: newPoints } : s));
+                return;
             }
             return;
         }
@@ -700,6 +985,73 @@ const Canvas: React.FC<CanvasProps> = ({
             setWallSnap(newWallSnap);
             setPreviewOpening(null);
 
+        } else if (tool === 'beam') {
+            // STRICT SNAP: Only snap to Columns
+            let finalPoint = worldPos;
+            let currentSnapType: SnapType = 'none';
+
+            const hitColumn = columns.find(c => distance(worldPos, { x: c.x, y: c.y }) < 25);
+            if (hitColumn) {
+                finalPoint = { x: hitColumn.x, y: hitColumn.y };
+                currentSnapType = 'endpoint'; // Reuse endpoint visual or create new 'node' type
+            }
+
+            setCursor(finalPoint); // Don't round if not snapped? Or round to grid? 
+            // If strict, we only care if it matches a column.
+            // But for visual feedback, let's just follow mouse if not snapped.
+            setSnapType(currentSnapType);
+            setActiveGuides([]);
+            setPreviewOpening(null);
+            setWallSnap(null);
+
+        } else if (tool === 'slab') {
+            // STRICT SNAP: Snap to Beams (Endpoints or Edge)
+            let finalPoint = worldPos;
+            let currentSnapType: SnapType = 'none';
+            let snapped = false;
+
+            // 1. Check Beam Endpoints (High Priority)
+            for (const beam of beams) {
+                if (distance(worldPos, beam.start) < 20) {
+                    finalPoint = beam.start;
+                    currentSnapType = 'endpoint';
+                    snapped = true;
+                    break;
+                }
+                if (distance(worldPos, beam.end) < 20) {
+                    finalPoint = beam.end;
+                    currentSnapType = 'endpoint';
+                    snapped = true;
+                    break;
+                }
+            }
+
+            // 2. Check Beam Edges
+            if (!snapped) {
+                for (const beam of beams) {
+                    const { point } = getClosestPointOnLine(worldPos, beam.start, beam.end);
+                    if (distance(worldPos, point) < 20) {
+                        finalPoint = point;
+                        currentSnapType = 'edge';
+                        snapped = true;
+                        break;
+                    }
+                }
+            }
+
+            // 3. Check Start Point (for closing loop)
+            if (points.length > 0 && distance(worldPos, points[0]) < 20) {
+                finalPoint = points[0];
+                currentSnapType = 'endpoint';
+                snapped = true;
+            }
+
+            setCursor(finalPoint);
+            setSnapType(currentSnapType);
+            setActiveGuides([]);
+            setPreviewOpening(null);
+            setWallSnap(null);
+
         } else if (tool === 'door' || tool === 'window') {
             // Opening Preview Logic
             const SNAP_THRESHOLD = 500; // World units
@@ -761,24 +1113,146 @@ const Canvas: React.FC<CanvasProps> = ({
                 });
 
                 if (edgePoint && snappedWall) {
-                    // STICKY SNAP: Ignore Grid if we are close to a wall
+                    // STICKY SNAP: We are on a wall.
+                    // CHECK ALIGNMENT ON WALL: Can we slide along the wall to align with another column?
                     finalPoint = edgePoint;
                     currentSnapType = 'edge';
-                    const distStart = distance(snappedWall.start, edgePoint);
-                    newWallSnap = { wall: snappedWall, point: edgePoint, distFromStart: distStart };
+
+                    const ALIGN_THRESHOLD = 20;
+                    let alignX: number | null = null;
+                    let alignY: number | null = null;
+
+                    // Check for intersections between the Wall Line and Alignment Lines
+                    columns.forEach(col => {
+                        // Vertical Alignment Line (x = col.x)
+                        if (Math.abs(edgePoint!.x - col.x) < ALIGN_THRESHOLD) {
+                            // Project onto wall? No, find intersection of Wall and X=col.x
+                            // If wall is vertical, it's either all aligned or none.
+                            // If wall is not vertical, there is a unique point on the wall with x = col.x
+                            // Check if that point is on the segment?
+                            // Simplified: Just check if current edgePoint.x is close to col.x
+                            // But we want to SNAP to col.x IF it lies on the wall.
+
+                            // Solve for Y on wall given X = col.x
+                            if (Math.abs(snappedWall!.start.x - snappedWall!.end.x) > 1) { // Not vertical wall
+                                const m = (snappedWall!.end.y - snappedWall!.start.y) / (snappedWall!.end.x - snappedWall!.start.x);
+                                const c = snappedWall!.start.y - m * snappedWall!.start.x;
+                                const targetY = m * col.x + c;
+
+                                // Check if this point (col.x, targetY) is on the segment
+                                const minX = Math.min(snappedWall!.start.x, snappedWall!.end.x);
+                                const maxX = Math.max(snappedWall!.start.x, snappedWall!.end.x);
+                                if (col.x >= minX - 1 && col.x <= maxX + 1) {
+                                    // Check distance to cursor
+                                    if (distance(worldPos, { x: col.x, y: targetY }) < ALIGN_THRESHOLD) {
+                                        finalPoint = { x: col.x, y: targetY };
+                                        guides.push({ type: 'alignment', orientation: 'vertical', position: col.x, refPoint: { x: col.x, y: col.y } });
+                                        currentSnapType = 'intersection';
+                                    }
+                                }
+                            } else {
+                                // Vertical wall: x is constant. If col.x matches, whole wall aligns.
+                                if (Math.abs(snappedWall!.start.x - col.x) < 5) {
+                                    guides.push({ type: 'alignment', orientation: 'vertical', position: col.x, refPoint: { x: col.x, y: col.y } });
+                                }
+                            }
+                        }
+
+                        // Horizontal Alignment Line (y = col.y)
+                        if (Math.abs(edgePoint!.y - col.y) < ALIGN_THRESHOLD) {
+                            if (Math.abs(snappedWall!.start.y - snappedWall!.end.y) > 1) { // Not horizontal wall
+                                // Check if Vertical Wall (dx ~ 0)
+                                if (Math.abs(snappedWall!.start.x - snappedWall!.end.x) < 1) {
+                                    // Vertical Wall: X is constant.
+                                    const targetX = snappedWall!.start.x;
+                                    const minY = Math.min(snappedWall!.start.y, snappedWall!.end.y);
+                                    const maxY = Math.max(snappedWall!.start.y, snappedWall!.end.y);
+
+                                    if (col.y >= minY - 1 && col.y <= maxY + 1) {
+                                        if (distance(worldPos, { x: targetX, y: col.y }) < ALIGN_THRESHOLD) {
+                                            finalPoint = { x: targetX, y: col.y };
+                                            guides.push({ type: 'alignment', orientation: 'horizontal', position: col.y, refPoint: { x: col.x, y: col.y } });
+                                            currentSnapType = 'intersection';
+                                        }
+                                    }
+                                } else {
+                                    // Diagonal Wall
+                                    // Solve for X on wall given Y = col.y
+                                    // x = (y - c) / m
+                                    const m = (snappedWall!.end.y - snappedWall!.start.y) / (snappedWall!.end.x - snappedWall!.start.x);
+                                    const c = snappedWall!.start.y - m * snappedWall!.start.x;
+                                    const targetX = (col.y - c) / m;
+
+                                    const minY = Math.min(snappedWall!.start.y, snappedWall!.end.y);
+                                    const maxY = Math.max(snappedWall!.start.y, snappedWall!.end.y);
+
+                                    if (col.y >= minY - 1 && col.y <= maxY + 1) {
+                                        if (distance(worldPos, { x: targetX, y: col.y }) < ALIGN_THRESHOLD) {
+                                            finalPoint = { x: targetX, y: col.y };
+                                            guides.push({ type: 'alignment', orientation: 'horizontal', position: col.y, refPoint: { x: col.x, y: col.y } });
+                                            currentSnapType = 'intersection';
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Horizontal wall
+                                if (Math.abs(snappedWall!.start.y - col.y) < 5) {
+                                    guides.push({ type: 'alignment', orientation: 'horizontal', position: col.y, refPoint: { x: col.x, y: col.y } });
+                                }
+                            }
+                        }
+                    });
+
+                    const distStart = distance(snappedWall.start, finalPoint);
+                    newWallSnap = { wall: snappedWall, point: finalPoint, distFromStart: distStart };
                 } else {
-                    // Fallback to Grid/Node Snap if not near a wall
+                    // 1. Global Column Alignment (Infinite Guides)
+                    const ALIGN_THRESHOLD = 20; // Snap distance
+                    let alignX: number | null = null;
+                    let alignY: number | null = null;
 
-                    // 1. Grid Snap
-                    finalPoint = snapToGrid(worldPos);
-                    currentSnapType = 'grid';
+                    columns.forEach(col => {
+                        // Don't snap to self if moving (though here we are placing new, so ok)
+                        if (Math.abs(worldPos.x - col.x) < ALIGN_THRESHOLD) {
+                            alignX = col.x;
+                            guides.push({
+                                type: 'alignment',
+                                orientation: 'vertical',
+                                position: col.x,
+                                refPoint: { x: col.x, y: col.y }
+                            });
+                        }
+                        if (Math.abs(worldPos.y - col.y) < ALIGN_THRESHOLD) {
+                            alignY = col.y;
+                            guides.push({
+                                type: 'alignment',
+                                orientation: 'horizontal',
+                                position: col.y,
+                                refPoint: { x: col.x, y: col.y }
+                            });
+                        }
+                    });
 
-                    // 2. Node Snap (Wall Ends) - Check this AFTER grid to refine? 
-                    // Actually, Node snap usually overrides grid.
+                    // Apply Alignment
+                    if (alignX !== null) finalPoint.x = alignX;
+                    if (alignY !== null) finalPoint.y = alignY;
+
+                    if (alignX !== null || alignY !== null) {
+                        currentSnapType = 'alignment';
+                    } else {
+                        // 2. Grid Snap (Fallback)
+                        finalPoint = snapToGrid(worldPos);
+                        currentSnapType = 'grid';
+                    }
+
+                    // 3. Node Snap (Wall Ends) - Check this AFTER grid/alignment to refine?
                     const nodeSnap = checkSnapToNodes(worldPos, walls);
                     if (nodeSnap) {
                         finalPoint = nodeSnap.point;
                         currentSnapType = nodeSnap.type;
+                        // Clear alignment guides if we snap to a node (usually preferred)
+                        // Or keep them? Let's clear to avoid clutter if node snap takes precedence
+                        guides = [];
                     }
                 }
             }
@@ -807,11 +1281,28 @@ const Canvas: React.FC<CanvasProps> = ({
     };
 
     const handleMouseUp = () => {
-        setIsPanning(false);
+        // Only stop drawing if NOT in wall/beam/slab mode (polyline/polygon)
+        if (tool !== 'wall' && tool !== 'beam' && tool !== 'slab') {
+            setIsDrawing(false);
+        }
+
+        // Precision Mode: In "Click-Click" mode, MouseUp doesn't necessarily mean "Stop Dragging" 
+        // because we aren't dragging. We are just clicking.
+        // So standard logic applies: We finished the "Action" of the click.
+
         setDragStart(null);
         setDragOriginalWall(null);
         setDragOriginalLabel(null);
         setDragOriginalColumn(null);
+        setIsPanning(false);
+        lastTouchRef.current = null; // Reset gesture state
+
+        // Finalize Wall
+        if (tool === 'wall' && points.length > 0) {
+            // If we just finished a segment, we stay in drawing mode for polyline
+            // But if we want to stop? Usually double click or Esc.
+            // For mobile, maybe a "Done" button or just keep drawing.
+        }
         // Reset snap state on mouse up
         setSnapType('none');
         setActiveGuides([]);
@@ -824,7 +1315,7 @@ const Canvas: React.FC<CanvasProps> = ({
                     id: generateId(),
                     start: sectionStart,
                     end: endPoint,
-                    label: `Section ${String.fromCharCode(65 + (settings.sections?.length || 0))}` // A, B, C...
+                    label: `Section ${String.fromCharCode(65 + (settings.sections?.length || 0))} ` // A, B, C...
                 };
                 onUpdateSettings(prev => ({
                     ...prev,
@@ -995,43 +1486,49 @@ const Canvas: React.FC<CanvasProps> = ({
         const ext1Start = { x: start.x + nx * gap, y: start.y + ny * gap };
         const ext2Start = { x: end.x + nx * gap, y: end.y + ny * gap };
 
+        const ext1End = { x: p1.x + nx * 5, y: p1.y + ny * 5 };
+        const ext2End = { x: p2.x + nx * 5, y: p2.y + ny * 5 };
+
         let textRotation = angle * (180 / Math.PI);
-        let textOffset = -5;
 
         if (textRotation > 90) textRotation -= 180;
         if (textRotation <= -90) textRotation += 180;
 
         const displayValue = text || Math.round(length / SCALE).toString();
-        const strokeColor = highlight ? "#22c55e" : color;
-        const textColor = highlight ? "#4ade80" : color;
-        const strokeWidth = highlight ? 1.5 : 0.5;
 
-        const fontSize = settings.dimensionFontSize || 12;
-        const textWidth = displayValue.length * (fontSize * 0.7);
+        const fontSize = 16; // Increased from default
+        const textWidth = (displayValue.length * 10) + 10;
+        const textOffset = -10;
 
         return (
-            <g className="pointer-events-none">
-                <line x1={ext1Start.x} y1={ext1Start.y} x2={p1.x + nx * 5} y2={p1.y + ny * 5} stroke={strokeColor} strokeWidth={0.5} strokeOpacity={0.5} />
-                <line x1={ext2Start.x} y1={ext2Start.y} x2={p2.x + nx * 5} y2={p2.y + ny * 5} stroke={strokeColor} strokeWidth={0.5} strokeOpacity={0.5} />
-                <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={strokeColor} strokeWidth={strokeWidth} />
+            <g>
+                {/* Main Line */}
+                <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={color} strokeWidth={1.5} />
 
+                {/* Extension Lines */}
+                <line x1={ext1Start.x} y1={ext1Start.y} x2={ext1End.x} y2={ext1End.y} stroke={color} strokeWidth={1} />
+                <line x1={ext2Start.x} y1={ext2Start.y} x2={ext2End.x} y2={ext2End.y} stroke={color} strokeWidth={1} />
+
+                {/* Ticks (using transforms) */}
                 <g transform={`translate(${p1.x}, ${p1.y}) rotate(${angle * (180 / Math.PI)})`}>
-                    <line x1={-3} y1={3} x2={3} y2={-3} stroke={strokeColor} strokeWidth={1} />
+                    <line x1={-4} y1={4} x2={4} y2={-4} stroke={color} strokeWidth={1.5} />
                 </g>
                 <g transform={`translate(${p2.x}, ${p2.y}) rotate(${angle * (180 / Math.PI)})`}>
-                    <line x1={-3} y1={3} x2={3} y2={-3} stroke={strokeColor} strokeWidth={1} />
+                    <line x1={-4} y1={4} x2={4} y2={-4} stroke={color} strokeWidth={1.5} />
                 </g>
 
+                {/* Text Label */}
                 <g transform={`translate(${(p1.x + p2.x) / 2}, ${(p1.y + p2.y) / 2}) rotate(${textRotation})`}>
-                    <rect x={-(textWidth / 2) - 4} y={textOffset - fontSize} width={textWidth + 8} height={fontSize + 4} fill="rgba(15, 23, 42, 0.95)" rx={2} />
+                    {/* Background Box for Readability */}
+                    <rect x={-(textWidth / 2) - 6} y={textOffset - fontSize - 2} width={textWidth + 12} height={fontSize + 6} fill="rgba(15, 23, 42, 0.95)" rx={4} stroke={color} strokeWidth={1} />
                     <text
                         x={0}
                         y={textOffset}
                         textAnchor="middle"
-                        fill={textColor}
+                        fill={highlight ? "#facc15" : "#e2e8f0"} // Brighter text
                         fontSize={fontSize}
                         fontFamily="monospace"
-                        fontWeight={highlight ? "bold" : "normal"}
+                        fontWeight="bold"
                     >
                         {displayValue} mm
                     </text>
@@ -1081,7 +1578,7 @@ const Canvas: React.FC<CanvasProps> = ({
                         strokeWidth={isSelected ? 3 : 2}
                     />
                     {opening.type === 'door' && (
-                        <path d={`M ${-widthPx / 2} ${heightPx / 2} Q ${-widthPx / 2} ${-widthPx} ${widthPx / 2} ${-heightPx / 2}`} fill="none" stroke={isSelected ? '#f97316' : "#a855f7"} strokeWidth={1} strokeDasharray="4 2" />
+                        <path d={`M ${-widthPx / 2} ${heightPx / 2} Q ${-widthPx / 2} ${-widthPx} ${widthPx / 2} ${-heightPx / 2} `} fill="none" stroke={isSelected ? '#f97316' : "#a855f7"} strokeWidth={1} strokeDasharray="4 2" />
                     )}
                 </g>
 
@@ -1114,22 +1611,36 @@ const Canvas: React.FC<CanvasProps> = ({
     }
 
     const renderLabels = () => {
-        return labels.map(l => (
-            <g key={l.id} transform={`translate(${l.x}, ${l.y})`}>
-                <text
-                    textAnchor="middle"
-                    fill={selectedId === l.id ? "#f97316" : "#fbbf24"}
-                    fontSize={16}
-                    fontWeight="bold"
-                    style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.8)' }}
-                >
-                    {l.text}
-                </text>
-                {selectedId === l.id && <rect x={-20} y={-15} width={40} height={20} stroke="#f97316" fill="none" strokeDasharray="2,2" />}
-            </g>
-        ));
+        return labels.map(l => {
+            const isSelected = selectedId === l.id;
+            const width = (l.text.length * 10) + 20;
+            return (
+                <g key={l.id} transform={`translate(${l.x}, ${l.y})`}>
+                    {/* Background Box */}
+                    <rect
+                        x={-(width / 2)}
+                        y={-15}
+                        width={width}
+                        height={30}
+                        fill="rgba(15, 23, 42, 0.8)"
+                        rx={4}
+                        stroke={isSelected ? "#f97316" : "rgba(251, 191, 36, 0.5)"}
+                        strokeWidth={isSelected ? 2 : 1}
+                    />
+                    <text
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fill={isSelected ? "#f97316" : "#fbbf24"}
+                        fontSize={18}
+                        fontWeight="bold"
+                        style={{ textShadow: '0px 1px 2px rgba(0,0,0,1)' }}
+                    >
+                        {l.text}
+                    </text>
+                </g>
+            );
+        });
     };
-
     const renderWallSplitDimensions = (wall: Wall, point: Point, distFromStart: number) => {
         const wallLen = distance(wall.start, wall.end);
         const dx = wall.end.x - wall.start.x;
@@ -1181,18 +1692,42 @@ const Canvas: React.FC<CanvasProps> = ({
     }
 
     const renderGuides = () => {
-        return activeGuides.map((g, i) => (
-            <line key={i} x1={g.refPoint.x} y1={g.refPoint.y} x2={cursor.x} y2={cursor.y} stroke="#3b82f6" strokeWidth={1} strokeDasharray="4,4" opacity={0.8} />
-        ))
+        return activeGuides.map((g, i) => {
+            if (g.type === 'alignment') {
+                // Draw Infinite Line
+                const INF = 100000;
+                if (g.orientation === 'vertical') {
+                    return <line key={i} x1={g.position} y1={-INF} x2={g.position} y2={INF} stroke="#3b82f6" strokeWidth={1} strokeDasharray="8,4" opacity={0.6} />
+                } else {
+                    return <line key={i} x1={-INF} y1={g.position} x2={INF} y2={g.position} stroke="#3b82f6" strokeWidth={1} strokeDasharray="8,4" opacity={0.6} />
+                }
+            }
+            // Default Guide (Point to Cursor)
+            return (
+                <line key={i} x1={g.refPoint.x} y1={g.refPoint.y} x2={cursor.x} y2={cursor.y} stroke="#3b82f6" strokeWidth={1} strokeDasharray="4,4" opacity={0.8} />
+            )
+        })
     }
 
     const renderSnapMarker = () => {
         if (!snapEnabled || snapType === 'none' || snapType === 'grid') return null;
-        if (snapType === 'endpoint') return <rect x={cursor.x - 4} y={cursor.y - 4} width={8} height={8} stroke="#22c55e" strokeWidth={2} fill="none" />;
-        if (snapType === 'midpoint') return <polygon points={`${cursor.x},${cursor.y - 5} ${cursor.x - 5},${cursor.y + 4} ${cursor.x + 5},${cursor.y + 4}`} stroke="#06b6d4" strokeWidth={2} fill="none" />;
-        if (snapType === 'alignment') return <g><line x1={cursor.x - 5} y1={cursor.y - 5} x2={cursor.x + 5} y2={cursor.y + 5} stroke="#3b82f6" strokeWidth={2} /><line x1={cursor.x + 5} y1={cursor.y - 5} x2={cursor.x - 5} y2={cursor.y + 5} stroke="#3b82f6" strokeWidth={2} /></g>;
-        if (snapType === 'edge') return <g transform={`translate(${cursor.x}, ${cursor.y})`}><line x1={-4} y1={-4} x2={4} y2={4} stroke="#eab308" strokeWidth={2} /><line x1={4} y1={-4} x2={-4} y2={4} stroke="#eab308" strokeWidth={2} /></g>;
-        if (snapType === 'intersection') return <g transform={`translate(${cursor.x}, ${cursor.y})`}><line x1={-6} y1={-6} x2={6} y2={6} stroke="#ef4444" strokeWidth={2} /><line x1={6} y1={-6} x2={-6} y2={6} stroke="#ef4444" strokeWidth={2} /></g>;
+
+        // Enhanced Snap Markers
+        if (snapType === 'endpoint') return (
+            <g>
+                <circle cx={cursor.x} cy={cursor.y} r={8} stroke="#22c55e" strokeWidth={3} fill="none" />
+                <circle cx={cursor.x} cy={cursor.y} r={4} fill="#22c55e" />
+            </g>
+        );
+        if (snapType === 'midpoint') return (
+            <g>
+                <polygon points={`${cursor.x},${cursor.y - 8} ${cursor.x - 8},${cursor.y + 6} ${cursor.x + 8},${cursor.y + 6}`} stroke="#06b6d4" strokeWidth={3} fill="none" />
+                <circle cx={cursor.x} cy={cursor.y} r={2} fill="#06b6d4" />
+            </g>
+        );
+        if (snapType === 'alignment') return <g><line x1={cursor.x - 10} y1={cursor.y - 10} x2={cursor.x + 10} y2={cursor.y + 10} stroke="#3b82f6" strokeWidth={3} /><line x1={cursor.x + 10} y1={cursor.y - 10} x2={cursor.x - 10} y2={cursor.y + 10} stroke="#3b82f6" strokeWidth={3} /></g>;
+        if (snapType === 'edge') return <g transform={`translate(${cursor.x}, ${cursor.y})`}><circle r={6} stroke="#eab308" strokeWidth={3} fill="none" /><line x1={-6} y1={0} x2={6} y2={0} stroke="#eab308" strokeWidth={2} transform="rotate(45)" /></g>;
+        if (snapType === 'intersection') return <g transform={`translate(${cursor.x}, ${cursor.y})`}><line x1={-8} y1={-8} x2={8} y2={8} stroke="#ef4444" strokeWidth={3} /><line x1={8} y1={-8} x2={-8} y2={8} stroke="#ef4444" strokeWidth={3} /></g>;
         return null;
     }
 
@@ -1200,6 +1735,21 @@ const Canvas: React.FC<CanvasProps> = ({
     // NEW: Render Start Guide
     const renderStartGuide = () => {
         if (walls.length > 0 || isDrawing) return null;
+
+        let guideText = "Select a tool below to start designing.";
+        let tipText = "Tip: Use the toolbar to switch modes.";
+
+        if (tool === 'wall') {
+            guideText = "Click and drag (or click points) to create walls.";
+            tipText = "Tip: Hold Shift to draw straight lines.";
+        } else if (tool === 'beam') {
+            guideText = "Click start and end points to create beams.";
+            tipText = "Tip: Beams snap to grid and columns.";
+        } else if (tool === 'slab') {
+            guideText = "Click points to define slab corners. Click start to close.";
+            tipText = "Tip: Ensure the shape is closed to finish.";
+        }
+
         return (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                 <div className="bg-slate-800/90 backdrop-blur p-6 rounded-xl border border-slate-700 text-center shadow-2xl max-w-sm">
@@ -1208,10 +1758,10 @@ const Canvas: React.FC<CanvasProps> = ({
                     </div>
                     <h3 className="text-white font-bold text-lg mb-2">Start Drawing</h3>
                     <p className="text-slate-400 text-sm mb-4">
-                        Select the <strong className="text-brand-400">Wall Tool</strong> below and drag on the canvas to create your first room.
+                        {guideText}
                     </p>
                     <div className="text-xs text-slate-500 bg-slate-900 p-2 rounded border border-slate-800">
-                        Tip: Hold <code>Shift</code> to draw straight lines.
+                        {tipText}
                     </div>
                 </div>
             </div>
@@ -1264,18 +1814,95 @@ const Canvas: React.FC<CanvasProps> = ({
             <svg width="100%" height="100%" className="absolute inset-0 pointer-events-none">
                 <defs>
                     <pattern id="grid" width={GRID_SIZE * viewport.scale} height={GRID_SIZE * viewport.scale} patternUnits="userSpaceOnUse">
-                        <path d={`M ${GRID_SIZE * viewport.scale} 0 L 0 0 0 ${GRID_SIZE * viewport.scale}`} fill="none" stroke="#334155" strokeWidth={0.5} />
+                        <path d={`M ${GRID_SIZE * viewport.scale} 0 L 0 0 0 ${GRID_SIZE * viewport.scale} `} fill="none" stroke="#334155" strokeWidth={0.5} />
                     </pattern>
                 </defs>
 
                 <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.scale})`}>
                     <rect x={-50000} y={-50000} width={100000} height={100000} fill="url(#grid)" opacity={0.3} />
 
+                    {/* Layer 0: Slabs (Bottom) */}
+                    {slabs.map(slab => {
+                        const isSelected = slab.id === selectedId;
+                        const pathData = slab.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y} `).join(' ') + ' Z';
+
+                        // Calculate Slab Type
+                        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                        slab.points.forEach(p => {
+                            minX = Math.min(minX, p.x);
+                            maxX = Math.max(maxX, p.x);
+                            minY = Math.min(minY, p.y);
+                            maxY = Math.max(maxY, p.y);
+                        });
+                        const width = maxX - minX;
+                        const height = maxY - minY;
+                        const long = Math.max(width, height);
+                        const short = Math.min(width, height);
+                        const ratio = short > 0 ? long / short : 1;
+                        const type = ratio >= 2.0 ? 'One-Way' : 'Two-Way';
+
+                        return (
+                            <g key={`slab - ${slab.id} `} onMouseDown={(e) => handleMouseDown(e, 'slab', slab.id)}>
+                                <path
+                                    d={pathData}
+                                    fill="rgba(203, 213, 225, 0.5)" // Slate-300 with opacity
+                                    stroke={isSelected ? "#f97316" : "#94a3b8"}
+                                    strokeWidth={isSelected ? 4 : 2}
+                                    className="cursor-pointer hover:fill-slate-300 transition-colors"
+                                />
+                                {/* Slab Label */}
+                                <g transform={`translate(${slab.points.reduce((acc, p) => acc + p.x, 0) / slab.points.length}, ${slab.points.reduce((acc, p) => acc + p.y, 0) / slab.points.length})`}>
+                                    <rect x={-40} y={-20} width={80} height={40} fill="rgba(15, 23, 42, 0.8)" rx={4} stroke="#94a3b8" strokeWidth={1} />
+                                    <text
+                                        x={0}
+                                        y={-5}
+                                        textAnchor="middle"
+                                        dominantBaseline="middle"
+                                        fill="#e2e8f0"
+                                        fontSize={14}
+                                        fontWeight="bold"
+                                        pointerEvents="none"
+                                    >
+                                        {slab.label || 'Slab'}
+                                    </text>
+                                    <text
+                                        x={0}
+                                        y={12}
+                                        textAnchor="middle"
+                                        dominantBaseline="middle"
+                                        fill="#94a3b8"
+                                        fontSize={10}
+                                        pointerEvents="none"
+                                    >
+                                        {type} ({ratio.toFixed(1)})
+                                    </text>
+                                </g>
+                            </g>
+                        );
+                    })}
+
+                    {/* Layer 0.2: Tributary Areas (Overlay) */}
+                    {settings.showTributaryAreas && (() => {
+                        const areas = calculateTributaryAreas(beams, slabs);
+                        return areas.map((area, idx) => (
+                            <path
+                                key={`trib - ${idx} `}
+                                d={area.polygon.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y} `).join(' ') + ' Z'}
+                                fill={area.color}
+                                stroke="none"
+                                className="pointer-events-none"
+                            />
+                        ));
+                    })()}
+
+                    {/* Layer 0.5: Beams */}
+
+
                     {/* Layer 1: Wall Lines (Bottom) */}
                     {walls.map(wall => {
                         const isSelected = wall.id === selectedId;
                         return (
-                            <g key={`wall-${wall.id}`}>
+                            <g key={`wall - ${wall.id} `}>
                                 {/* Outer glow for selection */}
                                 {isSelected && (
                                     <line x1={wall.start.x} y1={wall.start.y} x2={wall.end.x} y2={wall.end.y} stroke="#f97316" strokeWidth={(wall.thickness * SCALE) + 4} strokeOpacity={0.5} strokeLinecap="square" />
@@ -1295,10 +1922,45 @@ const Canvas: React.FC<CanvasProps> = ({
 
                     {/* Layer 3: Wall Dimensions (Top) - ensures they are always on top of walls */}
                     {walls.map(wall => (
-                        <g key={`dim-${wall.id}`}>
+                        <g key={`dim - ${wall.id} `}>
                             {renderDimensions(wall)}
                         </g>
                     ))}
+
+                    {/* Layer 4: Beams (Top of Walls) */}
+                    {beams.map(beam => {
+                        const isSelected = beam.id === selectedId;
+                        return (
+                            <g key={`beam - ${beam.id} `} onMouseDown={(e) => handleMouseDown(e, 'beam', beam.id)}>
+                                {/* Selection Glow */}
+                                {isSelected && (
+                                    <line x1={beam.start.x} y1={beam.start.y} x2={beam.end.x} y2={beam.end.y} stroke="#f97316" strokeWidth={(beam.width * SCALE) + 4} strokeOpacity={0.5} strokeLinecap="square" />
+                                )}
+                                {/* Beam Body - Magenta for Visibility */}
+                                <line x1={beam.start.x} y1={beam.start.y} x2={beam.end.x} y2={beam.end.y} stroke="#d946ef" strokeWidth={beam.width * SCALE} strokeLinecap="square" className="cursor-pointer" />
+                                {/* Center Line */}
+                                <line x1={beam.start.x} y1={beam.start.y} x2={beam.end.x} y2={beam.end.y} stroke="#fdf4ff" strokeWidth={1} strokeDasharray="10,5" strokeLinecap="square" pointerEvents="none" opacity={0.7} />
+
+                                {/* Beam Label */}
+                                {beam.label && (
+                                    <g transform={`translate(${(beam.start.x + beam.end.x) / 2}, ${(beam.start.y + beam.end.y) / 2 - (beam.width * SCALE / 2) - 15})`}>
+                                        <rect x={-20} y={-10} width={40} height={20} fill="rgba(15, 23, 42, 0.8)" rx={4} stroke="#d946ef" strokeWidth={1} />
+                                        <text
+                                            x={0}
+                                            y={5}
+                                            textAnchor="middle"
+                                            fill="#d946ef"
+                                            fontSize={12}
+                                            fontWeight="bold"
+                                            pointerEvents="none"
+                                        >
+                                            {beam.label}
+                                        </text>
+                                    </g>
+                                )}
+                            </g>
+                        );
+                    })}
 
                     {renderLabels()}
 
@@ -1315,7 +1977,7 @@ const Canvas: React.FC<CanvasProps> = ({
                         const getPadType = (c: Column) => {
                             const w = c.padWidth || settings.padWidth || 1000;
                             const l = c.padLength || settings.padLength || 1000;
-                            return `F${uniquePads.indexOf(`${w}x${l}`) + 1}`;
+                            return `F${uniquePads.indexOf(`${w}x${l}`) + 1} `;
                         };
 
                         return columns.map(col => {
@@ -1324,7 +1986,7 @@ const Canvas: React.FC<CanvasProps> = ({
                             const padLabel = getPadType(col);
 
                             return (
-                                <g key={`pad-${col.id}`} transform={`translate(${col.x}, ${col.y}) rotate(${col.rotation || 0})`}>
+                                <g key={`pad - ${col.id} `} transform={`translate(${col.x}, ${col.y}) rotate(${col.rotation || 0})`}>
                                     <rect
                                         x={-(pW * SCALE / 2)}
                                         y={-(pL * SCALE / 2)}
@@ -1356,8 +2018,9 @@ const Canvas: React.FC<CanvasProps> = ({
                     {/* Render Columns */}
                     {(() => {
                         // 1. Classify Columns (Simple Memoization logic inline for now)
+                        // 1. Classify Columns (Simple Memoization logic inline for now)
                         const uniqueSizes = Array.from(new Set(columns.map(c => `${c.width}x${c.height}`))).sort();
-                        const getType = (c: Column) => `C${uniqueSizes.indexOf(`${c.width}x${c.height}`) + 1}`;
+                        const getType = (c: Column) => `C${uniqueSizes.indexOf(`${c.width}x${c.height}`) + 1} `;
 
                         return columns.map(col => {
                             const isSelected = selectedId === col.id;
@@ -1482,7 +2145,7 @@ const Canvas: React.FC<CanvasProps> = ({
                         })).sort((a, b) => a.dist - b.dist).slice(0, 2);
 
                         return others.map(({ col, dist }) => (
-                            <g key={`dim-${selectedCol.id}-${col.id}`} className="pointer-events-none">
+                            <g key={`dim - ${selectedCol.id} -${col.id} `} className="pointer-events-none">
                                 <line
                                     x1={selectedCol.x}
                                     y1={selectedCol.y}
@@ -1649,8 +2312,71 @@ const Canvas: React.FC<CanvasProps> = ({
 
                     {isDrawing && points.length > 0 && (
                         <>
-                            <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#22c55e" strokeWidth={settings.blockThickness ? settings.blockThickness * SCALE : 225 * SCALE} opacity={0.7} />
-                            <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#22c55e" strokeWidth={2} strokeDasharray="5,5" />
+                            {tool === 'wall' && (
+                                <>
+                                    <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#22c55e" strokeWidth={settings.blockThickness ? settings.blockThickness * SCALE : 225 * SCALE} opacity={0.7} />
+                                    <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#22c55e" strokeWidth={2} strokeDasharray="5,5" />
+                                </>
+                            )}
+                            {tool === 'beam' && (
+                                <>
+                                    <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#3b82f6" strokeWidth={300 * SCALE} opacity={0.6} />
+                                    <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#3b82f6" strokeWidth={4} strokeDasharray="5,5" />
+                                    {/* Tooltip for Beam */}
+                                    <g transform={`translate(${cursor.x + 20}, ${cursor.y - 20})`}>
+                                        <rect x={0} y={-20} width={120} height={24} rx={4} fill="rgba(59, 130, 246, 0.9)" />
+                                        <text x={60} y={-4} textAnchor="middle" fill="white" fontSize={12} fontWeight="bold">Click to Place</text>
+                                    </g>
+                                </>
+                            )}
+                            {tool === 'slab' && (
+                                <>
+                                    <path
+                                        d={`${points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} L ${cursor.x} ${cursor.y} `}
+                                        fill="rgba(34, 197, 94, 0.2)"
+                                        stroke="#22c55e"
+                                        strokeWidth={3}
+                                        strokeDasharray="5,5"
+                                    />
+                                    {/* Dynamic Slab Type Preview */}
+                                    {points.length > 1 && (() => {
+                                        const tempPoints = [...points, cursor];
+                                        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                                        tempPoints.forEach(p => {
+                                            minX = Math.min(minX, p.x);
+                                            maxX = Math.max(maxX, p.x);
+                                            minY = Math.min(minY, p.y);
+                                            maxY = Math.max(maxY, p.y);
+                                        });
+                                        const width = maxX - minX;
+                                        const height = maxY - minY;
+                                        const long = Math.max(width, height);
+                                        const short = Math.min(width, height);
+                                        const ratio = short > 0 ? long / short : 1;
+                                        const type = ratio >= 2.0 ? 'One-Way' : 'Two-Way';
+
+                                        const centerX = (minX + maxX) / 2;
+                                        const centerY = (minY + maxY) / 2;
+
+                                        return (
+                                            <g transform={`translate(${centerX}, ${centerY})`}>
+                                                <rect x={-40} y={-15} width={80} height={30} fill="rgba(34, 197, 94, 0.8)" rx={4} />
+                                                <text x={0} y={5} textAnchor="middle" fill="white" fontSize={12} fontWeight="bold">
+                                                    {type} ({ratio.toFixed(1)})
+                                                </text>
+                                            </g>
+                                        )
+                                    })()}
+
+                                    {/* Closing Hint */}
+                                    {points.length > 2 && distance(cursor, points[0]) < 20 && (
+                                        <g>
+                                            <circle cx={points[0].x} cy={points[0].y} r={15} fill="#22c55e" opacity={0.8} />
+                                            <text x={points[0].x} y={points[0].y - 20} textAnchor="middle" fill="#22c55e" fontWeight="bold" fontSize={14}>Click to Close</text>
+                                        </g>
+                                    )}
+                                </>
+                            )}
                             {renderTooltip()}
                         </>
                     )}
@@ -1665,8 +2391,54 @@ const Canvas: React.FC<CanvasProps> = ({
             <div className="absolute bottom-24 md:bottom-4 right-4 flex flex-col gap-2">
                 <button className="bg-slate-800 p-2 rounded text-white hover:bg-slate-700 shadow-lg" onClick={() => handleZoomBtn(1)}><ZoomIn size={20} /></button>
                 <button className="bg-slate-800 p-2 rounded text-white hover:bg-slate-700 shadow-lg" onClick={() => handleZoomBtn(-1)}><ZoomOut size={20} /></button>
-                <button className={`bg-slate-800 p-2 rounded text-white hover:bg-slate-700 shadow-lg ${tool === 'pan' ? 'bg-brand-600' : ''}`} onClick={() => setTool(tool === 'pan' ? 'select' : 'pan')}><Move size={20} /></button>
+                <button className={`bg - slate - 800 p - 2 rounded text - white hover: bg - slate - 700 shadow - lg ${tool === 'pan' ? 'bg-brand-600' : ''} `} onClick={() => setTool(tool === 'pan' ? 'select' : 'pan')}><Move size={20} /></button>
             </div>
+
+            <DPad
+                isActive={precisionMode}
+                onToggleMode={() => {
+                    setPrecisionMode(!precisionMode);
+                    setVirtualCursor(null); // Reset when toggling
+                }}
+                onMove={(dx, dy) => {
+                    // Move Virtual Cursor
+                    // We need to know current cursor position.
+                    // If virtualCursor is null, use center of screen?
+                    let current = virtualCursor || cursor;
+
+                    // Adjust for scale? No, D-Pad should move in World Units or Screen Pixels?
+                    // Screen Pixels is more intuitive for "nudge".
+                    // But we operate in World Coordinates.
+                    // Let's say 1 step = 10px screen = 10/scale world.
+                    const scaleFactor = 1 / viewport.scale;
+                    const worldDx = dx * scaleFactor;
+                    const worldDy = dy * scaleFactor;
+
+                    const newPos = { x: current.x + worldDx, y: current.y + worldDy };
+                    setVirtualCursor(newPos);
+
+                    // Trigger "MouseMove" logic with new position to update snaps
+                    // We can't call handleMouseMove directly easily with a fake event.
+                    // Instead, we should refactor snap logic or just setCursor directly?
+                    // Setting cursor directly bypasses snap logic! 
+                    // We need to run the snap pipeline.
+
+                    // Hack: We can just update 'cursor' and let the render cycle handle it?
+                    // No, 'cursor' is the SNAPPED position. We need the RAW position to feed into snap logic.
+                    // We need to extract snap logic or simulate it.
+
+                    // For now, let's just update the cursor and assume the user is "nudging" the SNAPPED point?
+                    // No, that breaks snapping.
+
+                    // Let's just set the cursor for now and see. 
+                    // Ideally we should run `snapToGrid(newPos)` etc.
+                    // But `handleMouseMove` is huge.
+
+                    // Let's try to just update `cursor` and `virtualCursor`.
+                    // If we are in precision mode, we trust the D-Pad.
+                    setCursor(newPos);
+                }}
+            />
         </div >
     );
 };

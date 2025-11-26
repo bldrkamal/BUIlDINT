@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Wall, Opening, ProjectSettings, ToolMode, CalculationResult, ToolSettings, GroundTruth, ProjectMeta, ProjectData, ProjectLabel, Column } from './types';
+import { Wall, Opening, ProjectSettings, ToolMode, CalculationResult, ToolSettings, GroundTruth, ProjectMeta, ProjectData, ProjectLabel, Column, Beam, Slab } from './types';
 import { calculateEstimates } from './utils/physicsEngine';
 import { compileGraphData } from './utils/graphCompiler'; // Import Compiler
 import Toolbar from './components/Toolbar';
@@ -18,12 +18,14 @@ const App: React.FC = () => {
   const [walls, setWalls] = useState<Wall[]>([]);
   const [openings, setOpenings] = useState<Opening[]>([]);
   const [columns, setColumns] = useState<Column[]>([]);
+  const [beams, setBeams] = useState<Beam[]>([]);
+  const [slabs, setSlabs] = useState<Slab[]>([]);
   const [labels, setLabels] = useState<ProjectLabel[]>([]);
 
   // Selection State (Lifted from Canvas)
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const [history, setHistory] = useState<{ walls: Wall[], openings: Opening[], labels: ProjectLabel[] }[]>([]);
+  const [history, setHistory] = useState<{ walls: Wall[], openings: Opening[], labels: ProjectLabel[], columns: Column[], beams: Beam[], slabs: Slab[] }[]>([]);
 
   // Sensor Data
   const [meta, setMeta] = useState<ProjectMeta>({
@@ -112,10 +114,10 @@ const App: React.FC = () => {
 
   // --- Auto-Save & History Management ---
   useEffect(() => {
-    const currentState = { walls, openings, labels };
+    const currentState = { walls, openings, labels, columns, beams, slabs };
     // History logic
     const lastState = history[history.length - 1];
-    if (!lastState || lastState.walls !== walls || lastState.openings !== openings || lastState.labels !== labels) {
+    if (!lastState || lastState.walls !== walls || lastState.openings !== openings || lastState.labels !== labels || lastState.columns !== columns || lastState.beams !== beams || lastState.slabs !== slabs) {
       setMeta(prev => ({ ...prev, lastModified: new Date().toISOString() }));
     }
 
@@ -123,7 +125,7 @@ const App: React.FC = () => {
     if (walls.length > 0) {
       const autoSaveData: ProjectData = {
         meta,
-        graph: { walls, openings, columns, labels },
+        graph: { walls, openings, columns, beams, slabs, labels },
         settings,
         toolSettings,
         groundTruth
@@ -142,6 +144,9 @@ const App: React.FC = () => {
           if (data.graph) {
             setWalls(data.graph.walls);
             setOpenings(data.graph.openings);
+            setColumns(data.graph.columns || []);
+            setBeams(data.graph.beams || []);
+            setSlabs(data.graph.slabs || []);
             setLabels(data.graph.labels || []);
           }
           if (data.meta) setMeta(data.meta);
@@ -157,6 +162,9 @@ const App: React.FC = () => {
       const previous = history[history.length - 1];
       setWalls(previous.walls);
       setOpenings(previous.openings);
+      setColumns(previous.columns);
+      setBeams(previous.beams);
+      setSlabs(previous.slabs);
       setLabels(previous.labels);
       setHistory(prev => prev.slice(0, -1));
     }
@@ -166,9 +174,12 @@ const App: React.FC = () => {
     if (confirm("Are you sure you want to clear the entire plan?")) {
       setWalls([]);
       setOpenings([]);
+      setColumns([]);
+      setBeams([]);
+      setSlabs([]);
       setLabels([]);
       setGroundTruth({ hasFeedback: false });
-      setHistory(prev => [...prev, { walls: [], openings: [], labels: [] }]);
+      setHistory(prev => [...prev, { walls: [], openings: [], columns: [], beams: [], slabs: [], labels: [] }]);
       // New project = New ID
       setMeta(prev => ({
         ...prev,
@@ -182,7 +193,7 @@ const App: React.FC = () => {
   // --- Save / Load Logic (Graph-First JSON) ---
   const handleSave = () => {
     // 1. Compile Raw Geometry into GNN Topology (Now with Planarization & Semantics)
-    const gnnData = compileGraphData(walls, openings, labels);
+    const gnnData = compileGraphData(walls, openings, beams, slabs, labels);
 
     // 2. Construct the Master Protocol Payload
     const projectData: ProjectData = {
@@ -191,6 +202,8 @@ const App: React.FC = () => {
         walls,
         openings,
         columns,
+        beams,
+        slabs,
         labels
       },
       gnnReady: gnnData, // <--- The Clean Training Data
@@ -204,6 +217,20 @@ const App: React.FC = () => {
     const link = document.createElement('a');
     link.href = url;
     link.download = `construct_ai_${meta.id.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportTrainingData = () => {
+    const gnnData = compileGraphData(walls, openings, beams, slabs, labels);
+
+    const blob = new Blob([JSON.stringify(gnnData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `gnn_training_data_${meta.id.slice(0, 8)}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -226,6 +253,8 @@ const App: React.FC = () => {
           setWalls(json.graph.walls);
           setOpenings(json.graph.openings);
           setColumns(json.graph.columns || []);
+          setBeams(json.graph.beams || []);
+          setSlabs(json.graph.slabs || []);
           setLabels(json.graph.labels || []);
           if (json.meta) setMeta(json.meta);
           if (json.settings) setSettings(json.settings);
@@ -260,14 +289,14 @@ const App: React.FC = () => {
   };
 
   const setWallsWithHistory: React.Dispatch<React.SetStateAction<Wall[]>> = (action) => {
-    setHistory(prev => [...prev, { walls, openings, labels }]);
+    setHistory(prev => [...prev, { walls, openings, columns, beams, slabs, labels }]);
     setWalls(action);
   }
 
   // --- Physics Engine Integration ---
   const results = useMemo<CalculationResult>(() => {
-    return calculateEstimates(walls, openings, columns, settings);
-  }, [walls, openings, columns, settings]);
+    return calculateEstimates(walls, openings, columns, beams, slabs, settings);
+  }, [walls, openings, columns, beams, slabs, settings]);
 
   return (
     <div className="flex flex-col h-[100dvh] bg-slate-900 text-white overflow-hidden font-sans">
@@ -279,7 +308,7 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="font-bold text-lg md:text-xl tracking-tight truncate flex items-center gap-2">
-              Building Intelligence <span className="text-xs bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700 font-normal hidden md:block">v1.1 Sensor</span>
+              Building Intelligence
             </h1>
           </div>
         </div>
@@ -318,6 +347,7 @@ const App: React.FC = () => {
           onClear={handleClear}
           onSave={handleSave}
           onLoad={handleLoad}
+          onExportTrainingData={handleExportTrainingData}
         />
 
         <div className="flex-1 relative bg-canvas-bg overflow-hidden touch-none">
@@ -327,10 +357,14 @@ const App: React.FC = () => {
             walls={walls}
             openings={openings}
             columns={columns}
+            beams={beams}
+            slabs={slabs}
             labels={labels}
             setWalls={setWallsWithHistory}
             setOpenings={setOpenings}
             setColumns={setColumns}
+            setBeams={setBeams}
+            setSlabs={setSlabs}
             setLabels={setLabels}
             settings={settings}
             toolSettings={toolSettings}

@@ -922,27 +922,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
 
-        {/* AI Insight */}
-        <div className="pt-4 border-t border-slate-800 pb-20 md:pb-0">
-          <button
-            onClick={handleGenerateInsights}
-            disabled={aiLoading || results.blockCount === 0}
-            className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg font-medium flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-900/20"
-          >
-            {aiLoading ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-            {aiLoading ? 'Analyzing...' : 'Get Material Insights'}
-          </button>
-
-          {aiInsight && (
-            <div className="mt-6 prose prose-invert prose-sm max-w-none bg-slate-800/50 p-4 rounded-lg border border-indigo-500/20">
-              <ReactMarkdown>{aiInsight}</ReactMarkdown>
-            </div>
-          )}
-        </div>
-
         {/* Meta Footer */}
         <div className="text-[10px] text-slate-600 text-center pt-4 pb-4 flex flex-col gap-1">
-          <span>Construct-AI Sensor Active</span>
           <span className="font-mono">ID: {localStorage.getItem('project_id')?.slice(0, 8) || 'SESSION'}</span>
         </div>
 

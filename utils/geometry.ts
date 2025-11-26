@@ -203,7 +203,7 @@ export const isPointOnSegment = (p: Point, start: Point, end: Point, tolerance: 
 interface GraphNode {
   id: string;
   point: Point;
-  edges: string[]; // Connected Wall IDs
+  edges: Wall[]; // Connected walls (for degree calculation)
 }
 
 export const buildGraph = (walls: Wall[]): { nodes: GraphNode[], adjacency: Map<string, string[]> } => {
@@ -226,6 +226,10 @@ export const buildGraph = (walls: Wall[]): { nodes: GraphNode[], adjacency: Map<
       endNode = { id: generateId(), point: wall.end, edges: [] };
       nodes.push(endNode);
     }
+
+    // ✅ FIX: Add wall to node edges (for degree calculation)
+    startNode.edges.push(wall);
+    endNode.edges.push(wall);
 
     // Add edges (undirected)
     if (!adjacency.has(startNode.id)) adjacency.set(startNode.id, []);
@@ -444,4 +448,14 @@ export const calculateFloorArea = (walls: Wall[], scale: number = 1): number => 
   }
 
   return totalArea * (scale * scale);
+};
+
+export const calculatePolygonArea = (points: Point[]): number => {
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const j = (i + 1) % points.length;
+    area += points[i].x * points[j].y;
+    area -= points[j].x * points[i].y;
+  }
+  return Math.abs(area / 2);
 };
