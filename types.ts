@@ -120,6 +120,7 @@ export type ToolMode = 'select' | 'wall' | 'door' | 'window' | 'column' | 'beam'
 export interface CalculationResult {
   totalWallArea: number; // sq meters
   totalOpeningArea: number; // sq meters
+  totalColumnArea: number; // sq meters (column footprints)
   netArea: number; // sq meters
   blockCount: number;
   estimatedDuration?: number; // days

@@ -190,6 +190,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <span className="text-slate-400">Openings (Deduction):</span>
                 <span className="text-red-400 font-mono">-{results.totalOpeningArea.toFixed(2)} m²</span>
               </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Columns (Deduction):</span>
+                <span className="text-red-400 font-mono">-{results.totalColumnArea?.toFixed(2) || '0.00'} m²</span>
+              </div>
               <div className="flex justify-between text-sm pt-2 border-t border-slate-700">
                 <span className="text-slate-300 font-medium">Net Area:</span>
                 <span className="text-brand-200 font-mono font-bold">{results.netArea.toFixed(2)} m²</span>

@@ -259,7 +259,20 @@ export const calculateEstimates = (
     console.log(`  After: ${correctedWallLength.toFixed(2)}m`);
 
     const totalWallArea = correctedWallLength * (settings.wallHeightDefault / 1000); // m^2
-    const netArea = Math.max(0, totalWallArea - totalOpeningArea);
+
+    // Calculate column deductions (columns embedded in walls don't need blocks)
+    let totalColumnArea = 0;
+    columns.forEach(col => {
+        const colWidth = col.width / 1000; // Convert to meters
+        const colHeight = col.height / 1000;
+        const wallHeight = settings.wallHeightDefault / 1000;
+        const columnFootprintArea = colWidth * colHeight * wallHeight;
+        totalColumnArea += columnFootprintArea;
+    });
+
+    console.log(`  Column deduction: ${totalColumnArea.toFixed(2)}m²`);
+
+    const netArea = Math.max(0, totalWallArea - totalOpeningArea - totalColumnArea);
 
     // 2. Block Physics
     // Block count relies on the Face Area (Length x Height), thickness doesn't affect the count (just the volume/weight if we calculated that)
@@ -474,6 +487,7 @@ export const calculateEstimates = (
     return {
         totalWallArea,
         totalOpeningArea,
+        totalColumnArea,
         netArea,
         blockCount: Math.ceil(blockCount),
         paintArea,

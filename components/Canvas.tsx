@@ -1,4 +1,3 @@
-
 import React, { useRef, useState, MouseEvent, useEffect, KeyboardEvent as ReactKeyboardEvent, TouchEvent } from 'react';
 import { Wall, Point, Opening, ToolMode, ProjectSettings, ToolSettings, ViewportTransform, SnapGuide, SnapType, ProjectLabel, Column, SectionLine, CalculationResult, Beam, Slab } from '../types';
 import { distance, snapToGrid, checkSnapToNodes, getClosestPointOnLine, generateId, getAngle, snapToAngle, getAlignmentGuides, roundPoint, getLineIntersection } from '../utils/geometry';
@@ -6,6 +5,8 @@ import { calculateTributaryAreas } from '../utils/structuralAnalysis';
 import { Move, ZoomIn, ZoomOut, Keyboard, MousePointer2 } from 'lucide-react';
 import PropertiesPanel from './PropertiesPanel';
 import DPad from './DPad';
+import ManualInput from './ManualInput';
+import Magnifier from './Magnifier';
 
 interface CanvasProps {
     tool: ToolMode;
@@ -102,10 +103,6 @@ const Canvas: React.FC<CanvasProps> = ({
         distFromStart: number;
     } | null>(null);
 
-    // ... (existing state)
-
-
-
     // Precision Mode State
     const [precisionMode, setPrecisionMode] = useState(false);
     const [virtualCursor, setVirtualCursor] = useState<Point | null>(null); // For D-Pad control
@@ -113,6 +110,60 @@ const Canvas: React.FC<CanvasProps> = ({
     // Touch State
     const lastTouchRef = useRef<{ dist: number; center: Point } | null>(null);
     const TOUCH_OFFSET = 60; // px above finger
+
+    // Manual Input State
+    const [manualInputVisible, setManualInputVisible] = useState(false);
+    const [manualInputStart, setManualInputStart] = useState<Point | null>(null);
+
+    // Magnifier State
+    const [showMagnifier, setShowMagnifier] = useState(false);
+    const [screenCursor, setScreenCursor] = useState<Point>({ x: 0, y: 0 });
+
+    const handleManualInputCommit = (length: number, angle: number) => {
+        const start = manualInputStart || (points.length > 0 ? points[points.length - 1] : cursor);
+
+        // Convert angle to radians (0 degrees is Right/East)
+        const rad = (angle * Math.PI) / 180;
+        const dx = length * Math.cos(rad);
+        const dy = length * Math.sin(rad);
+
+        // Calculate end point (Scale is handled by the input being in mm, so we convert to pixels)
+        // Wait, input is in mm. Our coordinate system is pixels.
+        // We need to convert mm to pixels.
+        const lengthPx = length * SCALE;
+
+        const endPoint = {
+            x: start.x + Math.cos(rad) * lengthPx,
+            y: start.y + Math.sin(rad) * lengthPx
+        };
+
+        if (tool === 'wall' || tool === 'beam' || tool === 'slab') {
+            if (isDrawing) {
+                setPoints(prev => [...prev, endPoint]);
+            } else {
+                setPoints([start, endPoint]);
+                setIsDrawing(true);
+            }
+        }
+
+        setManualInputVisible(false);
+        setManualInputStart(null);
+    };
+
+    const toggleManualInput = () => {
+        if (manualInputVisible) {
+            setManualInputVisible(false);
+            setManualInputStart(null);
+        } else {
+            // Set start point
+            if (points.length > 0) {
+                setManualInputStart(points[points.length - 1]);
+            } else {
+                setManualInputStart(cursor);
+            }
+            setManualInputVisible(true);
+        }
+    };
 
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -169,9 +220,13 @@ const Canvas: React.FC<CanvasProps> = ({
             // If 2 fingers, we don't want to draw/select, we want to gesture.
             if (e.touches.length > 1) return;
 
+            setShowMagnifier(true);
+            setScreenCursor({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+
             clientX = e.touches[0].clientX;
             clientY = e.touches[0].clientY - TOUCH_OFFSET; // Apply Offset
         } else {
+            setShowMagnifier(false);
             const mouseEvent = e as React.MouseEvent;
             clientX = mouseEvent.clientX;
             clientY = mouseEvent.clientY;
@@ -671,6 +726,7 @@ const Canvas: React.FC<CanvasProps> = ({
                 return; // Stop processing as mouse move
             } else if (e.touches.length === 1) {
                 lastTouchRef.current = null; // Reset gesture
+                setScreenCursor({ x: e.touches[0].clientX, y: e.touches[0].clientY });
                 clientX = e.touches[0].clientX;
                 clientY = e.touches[0].clientY - TOUCH_OFFSET; // Apply Offset
             } else {
@@ -1281,6 +1337,7 @@ const Canvas: React.FC<CanvasProps> = ({
     };
 
     const handleMouseUp = () => {
+        setShowMagnifier(false);
         // Only stop drawing if NOT in wall/beam/slab mode (polyline/polygon)
         if (tool !== 'wall' && tool !== 'beam' && tool !== 'slab') {
             setIsDrawing(false);
@@ -2391,8 +2448,33 @@ const Canvas: React.FC<CanvasProps> = ({
             <div className="absolute bottom-24 md:bottom-4 right-4 flex flex-col gap-2">
                 <button className="bg-slate-800 p-2 rounded text-white hover:bg-slate-700 shadow-lg" onClick={() => handleZoomBtn(1)}><ZoomIn size={20} /></button>
                 <button className="bg-slate-800 p-2 rounded text-white hover:bg-slate-700 shadow-lg" onClick={() => handleZoomBtn(-1)}><ZoomOut size={20} /></button>
-                <button className={`bg - slate - 800 p - 2 rounded text - white hover: bg - slate - 700 shadow - lg ${tool === 'pan' ? 'bg-brand-600' : ''} `} onClick={() => setTool(tool === 'pan' ? 'select' : 'pan')}><Move size={20} /></button>
+                <button className={`bg-slate-800 p-2 rounded text-white hover:bg-slate-700 shadow-lg ${tool === 'pan' ? 'bg-brand-600' : ''}`} onClick={() => setTool(tool === 'pan' ? 'select' : 'pan')}><Move size={20} /></button>
+                <button
+                    className={`bg-slate-800 p-2 rounded text-white hover:bg-slate-700 shadow-lg ${manualInputVisible ? 'bg-brand-600' : ''}`}
+                    onClick={toggleManualInput}
+                    title="Manual Input (Length/Angle)"
+                >
+                    <Keyboard size={20} />
+                </button>
             </div>
+
+            <ManualInput
+                visible={manualInputVisible}
+                onCommit={handleManualInputCommit}
+                onCancel={() => setManualInputVisible(false)}
+                currentAngle={0}
+            />
+
+            <Magnifier
+                visible={showMagnifier && (tool === 'wall' || tool === 'beam' || tool === 'column' || tool === 'select')}
+                cursor={cursor} // Snapped world cursor
+                screenPos={screenCursor}
+                walls={walls}
+                columns={columns}
+                beams={beams}
+                slabs={slabs}
+                labels={labels}
+            />
 
             <DPad
                 isActive={precisionMode}
@@ -2401,42 +2483,44 @@ const Canvas: React.FC<CanvasProps> = ({
                     setVirtualCursor(null); // Reset when toggling
                 }}
                 onMove={(dx, dy) => {
-                    // Move Virtual Cursor
-                    // We need to know current cursor position.
-                    // If virtualCursor is null, use center of screen?
-                    let current = virtualCursor || cursor;
-
-                    // Adjust for scale? No, D-Pad should move in World Units or Screen Pixels?
-                    // Screen Pixels is more intuitive for "nudge".
-                    // But we operate in World Coordinates.
-                    // Let's say 1 step = 10px screen = 10/scale world.
                     const scaleFactor = 1 / viewport.scale;
                     const worldDx = dx * scaleFactor;
                     const worldDy = dy * scaleFactor;
 
-                    const newPos = { x: current.x + worldDx, y: current.y + worldDy };
-                    setVirtualCursor(newPos);
+                    if (selectedId) {
+                        // Nudge Selected Element
+                        // Check Columns
+                        const col = columns.find(c => c.id === selectedId);
+                        if (col) {
+                            setColumns(prev => prev.map(c => c.id === selectedId ? { ...c, x: c.x + worldDx, y: c.y + worldDy } : c));
+                            return;
+                        }
 
-                    // Trigger "MouseMove" logic with new position to update snaps
-                    // We can't call handleMouseMove directly easily with a fake event.
-                    // Instead, we should refactor snap logic or just setCursor directly?
-                    // Setting cursor directly bypasses snap logic! 
-                    // We need to run the snap pipeline.
+                        // Check Walls
+                        const wall = walls.find(w => w.id === selectedId);
+                        if (wall) {
+                            setWalls(prev => prev.map(w => w.id === selectedId ? {
+                                ...w,
+                                start: { x: w.start.x + worldDx, y: w.start.y + worldDy },
+                                end: { x: w.end.x + worldDx, y: w.end.y + worldDy }
+                            } : w));
+                            return;
+                        }
 
-                    // Hack: We can just update 'cursor' and let the render cycle handle it?
-                    // No, 'cursor' is the SNAPPED position. We need the RAW position to feed into snap logic.
-                    // We need to extract snap logic or simulate it.
+                        // Check Labels
+                        const label = labels.find(l => l.id === selectedId);
+                        if (label) {
+                            setLabels(prev => prev.map(l => l.id === selectedId ? { ...l, x: l.x + worldDx, y: l.y + worldDy } : l));
+                            return;
+                        }
 
-                    // For now, let's just update the cursor and assume the user is "nudging" the SNAPPED point?
-                    // No, that breaks snapping.
-
-                    // Let's just set the cursor for now and see. 
-                    // Ideally we should run `snapToGrid(newPos)` etc.
-                    // But `handleMouseMove` is huge.
-
-                    // Let's try to just update `cursor` and `virtualCursor`.
-                    // If we are in precision mode, we trust the D-Pad.
-                    setCursor(newPos);
+                    } else {
+                        // Move Virtual Cursor
+                        let current = virtualCursor || cursor;
+                        const newPos = { x: current.x + worldDx, y: current.y + worldDy };
+                        setVirtualCursor(newPos);
+                        setCursor(newPos);
+                    }
                 }}
             />
         </div >

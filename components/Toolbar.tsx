@@ -92,7 +92,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   );
 
   return (
-    <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 flex-row md:translate-x-0 md:static md:absolute md:left-4 md:top-20 md:flex-col gap-2 bg-slate-800 p-2 rounded-full md:rounded-xl shadow-xl border border-slate-700 z-40 flex items-center overflow-x-auto max-w-[95vw]">
+    <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 flex-row md:translate-x-0 md:static md:absolute md:left-4 md:top-20 md:flex-col gap-2 bg-slate-800/90 backdrop-blur-xl p-2 rounded-2xl md:rounded-xl shadow-2xl border border-slate-700/50 z-40 flex items-center overflow-x-auto max-w-[90vw] scrollbar-hide">
 
       {/* Edit Group */}
       <div className="flex gap-1 md:flex-col md:gap-2">
