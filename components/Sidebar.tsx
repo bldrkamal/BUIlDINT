@@ -176,6 +176,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
 
+
+
           {/* Results Card (Scrollable) */}
           <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 shadow-lg">
             <h3 className="text-lg font-semibold text-brand-400 mb-4 uppercase tracking-wider text-xs">Real-time Stats</h3>
@@ -199,12 +201,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <Database size={10} />
                   Mortar Components (1:6 Mix)
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <div className="bg-slate-900 p-2 rounded border border-slate-700">
+                    <div className="text-[10px] text-slate-400">Volume</div>
+                    <div className="text-sm text-white font-mono">{results.mortarVolume.toFixed(2)}</div>
+                    <div className="text-[10px] text-slate-500">m³</div>
+                  </div>
                   <div className="bg-slate-900 p-2 rounded border border-slate-700">
                     <div className="text-[10px] text-slate-400">Cement</div>
                     <div className="text-sm text-white font-mono">{Math.ceil(results.cementBags)}</div>
                     <div className="text-[10px] text-slate-500">Bags</div>
                   </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
                   <div className="bg-slate-900 p-2 rounded border border-slate-700">
                     <div className="text-[10px] text-slate-400">Sand</div>
                     <div className="text-sm text-white font-mono">{results.sandTons.toFixed(1)}</div>

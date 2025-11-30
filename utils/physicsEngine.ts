@@ -1,6 +1,5 @@
-
 import { Wall, Opening, ProjectSettings, CalculationResult, Column, SafetyReport, SafetyStatus, SafetyIssue, Beam, Slab } from '../types';
-import { distance, calculateFloorArea, buildGraph, calculatePolygonArea } from './geometry';
+import { distance, calculateFloorArea, buildGraph, calculatePolygonArea, detectAndSplitJunctions } from './geometry';
 
 // CONSTANTS
 const SCALE = 0.05; // Must match Canvas scale for decoding length
@@ -201,11 +200,16 @@ export const calculateEstimates = (
     settings: ProjectSettings
 ): CalculationResult => {
 
+    // --- STEP 0: Detect and Split Junctions ---
+    // This handles both T-junctions and cross-intersections
+    // ensuring all walls are properly split at junction points
+    const processedWalls = detectAndSplitJunctions(walls);
+
     let totalWallLength = 0;
     let totalOpeningArea = 0;
 
-    // 1. Geometry Parsing
-    walls.forEach(w => {
+    // 1. Geometry Parsing - Use processed walls with junctions split
+    processedWalls.forEach(w => {
         const len = distance(w.start, w.end) / SCALE; // Length in mm (decoded from pixel space)
         totalWallLength += len;
     });
@@ -220,24 +224,31 @@ export const calculateEstimates = (
     // Convert length to meters for Area Calc
     const totalWallLengthMeters = totalWallLength / 1000;
 
-    // --- Accuracy Refinement: Corner Overlap Correction ---
-    // Subtract overlap at intersections to prevent double counting volume/area
-    const { nodes } = buildGraph(walls);
+    // --- GT-OCA: Corrected Overlap Correction ---
+    // Using volume-based junction correction: V = (k-1) × t² × h
+    const { nodes } = buildGraph(processedWalls);
     let overlapLengthCorrection = 0;
-    const wallThicknessM = (settings.blockThickness || 225) / 1000;
+    const wallHeight = settings.wallHeightDefault / 1000; // meters
 
-    // DEBUG: Log corner correction
-    console.log('🔧 Corner Correction Debug:');
-    console.log(`  Total nodes: ${nodes.length}`);
+    console.log('🔧 GT-OCA Junction Overlap Correction:');
+    console.log(`  Total junctions: ${nodes.length}`);
 
     nodes.forEach(node => {
         const degree = node.edges.length;
         if (degree > 1) {
-            // For k walls meeting, we subtract (k-1) overlaps
-            // Assuming 90 degree intersections, overlap length is Thickness
-            const nodeOverlap = (degree - 1) * wallThicknessM;
-            overlapLengthCorrection += nodeOverlap;
-            console.log(`  Node deg=${degree}: overlap=${nodeOverlap.toFixed(3)}m`);
+            const walls = node.edges;
+            const thicknesses = walls.map(w => w.thickness);
+            const avgThickness = thicknesses.reduce((a, b) => a + b, 0) / degree;
+            const thicknessM = avgThickness / 1000;
+
+            // Junction overlap volume: V = (k-1) × t² × h
+            const overlapVolume = (degree - 1) * (thicknessM ** 2) * wallHeight;
+
+            // Convert volume to length correction: L = V / (t × h)
+            const lengthCorrection = overlapVolume / (thicknessM * wallHeight);
+            overlapLengthCorrection += lengthCorrection;
+
+            console.log(`  Junction deg=${degree}: V=${overlapVolume.toFixed(4)}m³, L=${lengthCorrection.toFixed(3)}m`);
         }
     });
 

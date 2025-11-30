@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Wall, Opening, ProjectSettings, ToolMode, CalculationResult, ToolSettings, GroundTruth, ProjectMeta, ProjectData, ProjectLabel, Column, Beam, Slab } from './types';
 import { calculateEstimates } from './utils/physicsEngine';
-import { compileGraphData } from './utils/graphCompiler'; // Import Compiler
+import { compileGraphData } from './utils/graphCompiler';
 import Toolbar from './components/Toolbar';
 import Sidebar from './components/Sidebar';
 import Canvas from './components/Canvas';
@@ -22,14 +21,14 @@ const App: React.FC = () => {
   const [slabs, setSlabs] = useState<Slab[]>([]);
   const [labels, setLabels] = useState<ProjectLabel[]>([]);
 
-  // Selection State (Lifted from Canvas)
+  // Selection State
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [history, setHistory] = useState<{ walls: Wall[], openings: Opening[], labels: ProjectLabel[], columns: Column[], beams: Beam[], slabs: Slab[] }[]>([]);
 
   // Sensor Data
   const [meta, setMeta] = useState<ProjectMeta>({
-    id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2), // Project Identity
+    id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
     appName: "Building Intelligence",
     version: "1.1.0",
     createdDate: new Date().toISOString(),
@@ -37,40 +36,37 @@ const App: React.FC = () => {
     deviceInfo: navigator.userAgent
   });
 
-  // Ground Truth (The Reckoning)
+  // Ground Truth
   const [groundTruth, setGroundTruth] = useState<GroundTruth>({
     hasFeedback: false
   });
 
-  // Sidebar visibility state for responsive control
+  // Sidebar visibility
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 768);
 
   const [settings, setSettings] = useState<ProjectSettings>({
-    blockLength: 450, // Standard sandcrete length
-    blockHeight: 225, // Standard sandcrete height
-    blockThickness: 225, // Standard 9-inch block width
+    blockLength: 450,
+    blockHeight: 225,
+    blockThickness: 225,
     mortarThickness: 20,
     floorThickness: 150,
-    wallHeightDefault: 3000, // 3 meters
+    wallHeightDefault: 3000,
     wastagePercentage: 5,
 
     dimensionOffset: 50,
     dimensionFontSize: 12,
-    mortarRatio: 6, // Default 1:6
+    mortarRatio: 6,
 
-    // Lintel Defaults
     lintelType: 'chain',
     lintelOverhang: 150,
     mainBarDiameter: 12,
     mainBarCount: 4,
     stirrupBarDiameter: 8,
 
-    // Labor Defaults
     masons: 2,
     laborers: 1,
-    targetDailyRate: 100, // Blocks/day/mason
+    targetDailyRate: 100,
 
-    // Floor & Foundation Defaults
     floorMixRatio: "1:2:4",
     foundationType: 'strip',
     foundationWidth: 450,
@@ -88,9 +84,8 @@ const App: React.FC = () => {
     columnHeight: 225
   });
 
-  // --- The Sensor Strategy: Capture Context ---
+  // --- GPS Sensor ---
   useEffect(() => {
-    // Attempt to capture GPS for Regional Variance analysis
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -106,22 +101,18 @@ const App: React.FC = () => {
         },
         (error) => {
           console.log("GPS Sensor Access Denied or Error", error);
-          // We continue without GPS - that is a data point in itself
         }
       );
     }
   }, []);
 
-  // --- Auto-Save & History Management ---
+  // --- Auto-Save & History ---
   useEffect(() => {
-    const currentState = { walls, openings, labels, columns, beams, slabs };
-    // History logic
     const lastState = history[history.length - 1];
     if (!lastState || lastState.walls !== walls || lastState.openings !== openings || lastState.labels !== labels || lastState.columns !== columns || lastState.beams !== beams || lastState.slabs !== slabs) {
       setMeta(prev => ({ ...prev, lastModified: new Date().toISOString() }));
     }
 
-    // Auto-Save (Local Storage) - "Auto Recovery"
     if (walls.length > 0) {
       const autoSaveData: ProjectData = {
         meta,
@@ -132,9 +123,9 @@ const App: React.FC = () => {
       };
       localStorage.setItem('construct_ai_autosave', JSON.stringify(autoSaveData));
     }
-  }, [walls, openings, labels]);
+  }, [walls, openings, labels, columns, beams, slabs]);
 
-  // Restore AutoSave on mount
+  // Restore AutoSave
   useEffect(() => {
     const saved = localStorage.getItem('construct_ai_autosave');
     if (saved) {
@@ -180,7 +171,6 @@ const App: React.FC = () => {
       setLabels([]);
       setGroundTruth({ hasFeedback: false });
       setHistory(prev => [...prev, { walls: [], openings: [], columns: [], beams: [], slabs: [], labels: [] }]);
-      // New project = New ID
       setMeta(prev => ({
         ...prev,
         id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
@@ -188,25 +178,14 @@ const App: React.FC = () => {
       }));
       localStorage.removeItem('construct_ai_autosave');
     }
-  }
+  };
 
-  // --- Save / Load Logic (Graph-First JSON) ---
   const handleSave = () => {
-    // 1. Compile Raw Geometry into GNN Topology (Now with Planarization & Semantics)
     const gnnData = compileGraphData(walls, openings, beams, slabs, labels);
-
-    // 2. Construct the Master Protocol Payload
     const projectData: ProjectData = {
       meta,
-      graph: {
-        walls,
-        openings,
-        columns,
-        beams,
-        slabs,
-        labels
-      },
-      gnnReady: gnnData, // <--- The Clean Training Data
+      graph: { walls, openings, columns, beams, slabs, labels },
+      gnnReady: gnnData,
       settings,
       toolSettings,
       groundTruth
@@ -225,7 +204,6 @@ const App: React.FC = () => {
 
   const handleExportTrainingData = () => {
     const gnnData = compileGraphData(walls, openings, beams, slabs, labels);
-
     const blob = new Blob([JSON.stringify(gnnData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -247,9 +225,7 @@ const App: React.FC = () => {
         const content = event.target?.result as string;
         const json = JSON.parse(content);
 
-        // Detect if it's the new "ProjectData" format or legacy
         if (json.graph && Array.isArray(json.graph.walls)) {
-          // Version 1.1 (Graph Format)
           setWalls(json.graph.walls);
           setOpenings(json.graph.openings);
           setColumns(json.graph.columns || []);
@@ -261,15 +237,13 @@ const App: React.FC = () => {
           if (json.toolSettings) setToolSettings(json.toolSettings);
           if (json.groundTruth) setGroundTruth(json.groundTruth);
         } else if (Array.isArray(json.walls) || Array.isArray(json.data?.walls)) {
-          // Legacy Format Support
           const data = json.data || json;
           setWalls(data.walls);
           setOpenings(data.openings || []);
-          setColumns([]); // No columns in legacy
+          setColumns([]);
           setLabels([]);
           if (data.settings) setSettings(data.settings);
           if (data.toolSettings) setToolSettings(data.toolSettings);
-          // Assign a new ID for legacy files
           setMeta(prev => ({
             ...prev,
             id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2),
@@ -291,9 +265,8 @@ const App: React.FC = () => {
   const setWallsWithHistory: React.Dispatch<React.SetStateAction<Wall[]>> = (action) => {
     setHistory(prev => [...prev, { walls, openings, columns, beams, slabs, labels }]);
     setWalls(action);
-  }
+  };
 
-  // --- Physics Engine Integration ---
   const results = useMemo<CalculationResult>(() => {
     return calculateEstimates(walls, openings, columns, beams, slabs, settings);
   }, [walls, openings, columns, beams, slabs, settings]);

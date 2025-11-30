@@ -198,6 +198,131 @@ export const isPointOnSegment = (p: Point, start: Point, end: Point, tolerance: 
   return Math.abs((d1 + d2) - d) < tolerance;
 };
 
+/**
+ * Detects and splits walls at all junction points (T-junctions and cross-intersections).
+ * This ensures accurate block calculations regardless of drawing method.
+ * 
+ * @param walls - Array of walls to process
+ * @returns Array of walls with junctions properly split
+ */
+export const detectAndSplitJunctions = (walls: Wall[]): Wall[] => {
+  if (walls.length === 0) return walls;
+
+  let processedWalls = [...walls];
+  const splitThreshold = 15; // px tolerance for detecting junctions (relaxed for better detection)
+  const endpointThreshold = 5; // px tolerance to avoid splitting near endpoints
+  let hasSplits = true;
+  let iterations = 0;
+  const maxIterations = 10;
+
+  console.log(`🔍 detectAndSplitJunctions: Starting with ${walls.length} walls`);
+
+  while (hasSplits && iterations < maxIterations) {
+    hasSplits = false;
+    iterations++;
+    const nextWalls: Wall[] = [];
+
+    for (let i = 0; i < processedWalls.length; i++) {
+      const wall = processedWalls[i];
+      const splitPoints: { t: number; point: Point }[] = [];
+
+      // Check for T-junctions: other walls' endpoints on this wall's segment
+      for (let j = 0; j < processedWalls.length; j++) {
+        if (i === j) continue;
+        const otherWall = processedWalls[j];
+
+        // Check if other wall's start point is on this wall
+        const closestStart = getClosestPointOnLine(otherWall.start, wall.start, wall.end);
+        const distToLineStart = distance(otherWall.start, closestStart.point);
+        const distToWallStart = distance(closestStart.point, wall.start);
+        const distToWallEnd = distance(closestStart.point, wall.end);
+
+        if (
+          distToLineStart < splitThreshold &&
+          closestStart.t > 0.01 && closestStart.t < 0.99 &&
+          distToWallStart > endpointThreshold &&
+          distToWallEnd > endpointThreshold
+        ) {
+          console.log(`✂️ T-junction detected: Wall ${i} split by endpoint of wall ${j}, dist=${distToLineStart.toFixed(1)}px`);
+          splitPoints.push({ t: closestStart.t, point: closestStart.point });
+          hasSplits = true;
+        }
+
+        // Check if other wall's end point is on this wall
+        const closestEnd = getClosestPointOnLine(otherWall.end, wall.start, wall.end);
+        const distToLineEnd = distance(otherWall.end, closestEnd.point);
+        const distToWallStartEnd = distance(closestEnd.point, wall.start);
+        const distToWallEndEnd = distance(closestEnd.point, wall.end);
+
+        if (
+          distToLineEnd < splitThreshold &&
+          closestEnd.t > 0.01 && closestEnd.t < 0.99 &&
+          distToWallStartEnd > endpointThreshold &&
+          distToWallEndEnd > endpointThreshold
+        ) {
+          console.log(`✂️ T-junction detected: Wall ${i} split by endpoint of wall ${j}, dist=${distToLineEnd.toFixed(1)}px`);
+          splitPoints.push({ t: closestEnd.t, point: closestEnd.point });
+          hasSplits = true;
+        }
+      }
+
+      // Check for cross-intersections: this wall intersects with other walls
+      for (let j = i + 1; j < processedWalls.length; j++) {
+        const otherWall = processedWalls[j];
+        const intersection = getLineIntersection(wall.start, wall.end, otherWall.start, otherWall.end);
+
+        if (intersection) {
+          const distToWallStartCross = distance(intersection, wall.start);
+          const distToWallEndCross = distance(intersection, wall.end);
+
+          if (distToWallStartCross > endpointThreshold && distToWallEndCross > endpointThreshold) {
+            const wallLen = distance(wall.start, wall.end);
+            const t = distToWallStartCross / wallLen;
+            console.log(`✂️ Cross-intersection detected: Walls ${i} and ${j} intersect`);
+            splitPoints.push({ t, point: intersection });
+            hasSplits = true;
+          }
+        }
+      }
+
+      // Remove duplicate split points (same location)
+      const uniqueSplitPoints = splitPoints.filter((sp, idx, arr) => {
+        return arr.findIndex(other => distance(sp.point, other.point) < 2) === idx;
+      });
+
+      // Split the wall if there are split points
+      if (uniqueSplitPoints.length > 0) {
+        uniqueSplitPoints.sort((a, b) => a.t - b.t);
+
+        let currentStart = wall.start;
+        uniqueSplitPoints.forEach(sp => {
+          nextWalls.push({
+            ...wall,
+            id: generateId(),
+            start: currentStart,
+            end: sp.point
+          });
+          currentStart = sp.point;
+        });
+        nextWalls.push({
+          ...wall,
+          id: generateId(),
+          start: currentStart,
+          end: wall.end
+        });
+        console.log(`  Wall ${i} split into ${uniqueSplitPoints.length + 1} segments`);
+      } else {
+        nextWalls.push(wall);
+      }
+    }
+
+    processedWalls = nextWalls;
+  }
+
+  console.log(`✅ detectAndSplitJunctions: Completed after ${iterations} iterations, ${processedWalls.length} walls`);
+  return processedWalls;
+};
+
 // --- Graph & Polygon Logic for Accuracy ---
 
 interface GraphNode {
