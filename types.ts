@@ -1,3 +1,5 @@
+// Re-export marketplace types
+export * from './types/marketplace';
 
 export interface Point {
   x: number;

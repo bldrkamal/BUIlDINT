@@ -112,7 +112,7 @@ export const getAngle = (p1: Point, p2: Point): number => {
   return theta;
 };
 
-export const snapToAngle = (start: Point, current: Point, threshold: number = 10): { point: Point, snapped: boolean, angle: number } => {
+export const snapToAngle = (start: Point, current: Point, threshold: number = 15): { point: Point, snapped: boolean, angle: number } => {
   const dx = current.x - start.x;
   const dy = current.y - start.y;
   const dist = Math.sqrt(dx * dx + dy * dy);

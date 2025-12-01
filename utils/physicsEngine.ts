@@ -1,5 +1,5 @@
 import { Wall, Opening, ProjectSettings, CalculationResult, Column, SafetyReport, SafetyStatus, SafetyIssue, Beam, Slab } from '../types';
-import { distance, calculateFloorArea, buildGraph, calculatePolygonArea, detectAndSplitJunctions } from './geometry';
+import { distance, calculateFloorArea, buildGraph, calculatePolygonArea, detectAndSplitJunctions, getAngle } from './geometry';
 
 // CONSTANTS
 const SCALE = 0.05; // Must match Canvas scale for decoding length
@@ -242,7 +242,50 @@ export const calculateEstimates = (
             const thicknessM = avgThickness / 1000;
 
             // Junction overlap volume: V = (k-1) × t² × h
-            const overlapVolume = (degree - 1) * (thicknessM ** 2) * wallHeight;
+            // For 2-way intersections, use trigonometric correction: V = (t² * h) / sin(theta)
+            let overlapVolume = 0;
+
+            if (degree === 2) {
+                const w1 = walls[0];
+                const w2 = walls[1];
+
+                // Find the "other" endpoints to calculate angle
+                const p1 = (distance(w1.start, node.point) < 1) ? w1.end : w1.start;
+                const p2 = (distance(w2.start, node.point) < 1) ? w2.end : w2.start;
+
+                let theta = Math.abs(getAngle(node.point, p1) - getAngle(node.point, p2));
+                if (theta > 180) theta = 360 - theta;
+
+                // Convert to radians for sin
+                const thetaRad = theta * (Math.PI / 180);
+
+                // Limit theta to avoid division by zero or extreme values for parallel walls
+                // Minimum angle 15 degrees as per paper
+                const minAngleRad = 15 * (Math.PI / 180);
+                const effectiveTheta = Math.max(thetaRad, minAngleRad);
+
+                // If angle is close to 180 (straight line), overlap is 0 (or handled by wall length?)
+                // Actually, if it's a straight line, there is NO overlap subtraction needed usually, 
+                // but here we are treating it as a junction. 
+                // However, for a straight wall split in two, the "overlap" is just the continuity.
+                // The formula V = t^2 h / sin(theta) blows up at 0 and 180.
+                // For 90 deg, sin(90)=1, V = t^2 h. Correct.
+
+                // If theta is near 180, sin(theta) is near 0.
+                // We should only apply this for "corners". 
+                // If theta > 165 (near straight), we assume 0 overlap correction?
+                if (theta > 165) {
+                    overlapVolume = 0;
+                } else {
+                    overlapVolume = (thicknessM ** 2) * wallHeight / Math.sin(effectiveTheta);
+                }
+
+                console.log(`  Junction deg=2, theta=${theta.toFixed(1)}°, V=${overlapVolume.toFixed(4)}m³`);
+
+            } else {
+                // Fallback for > 2 walls (Orthogonal approximation)
+                overlapVolume = (degree - 1) * (thicknessM ** 2) * wallHeight;
+            }
 
             // Convert volume to length correction: L = V / (t × h)
             const lengthCorrection = overlapVolume / (thicknessM * wallHeight);
