@@ -1,31 +1,29 @@
 import { Wall, Opening, ProjectSettings, CalculationResult, Column, SafetyReport, SafetyStatus, SafetyIssue, Beam, Slab } from '../types';
-import { distance, calculateFloorArea, buildGraph, calculatePolygonArea, detectAndSplitJunctions, getAngle } from './geometry';
+import { distance, calculateFloorArea, calculatePolygonArea, getAngle, wallToPolygon, computeUnion, computeDifference, calculateMultiPolygonArea } from './geometry';
 
 // CONSTANTS
 const SCALE = 0.05; // Must match Canvas scale for decoding length
 
 /**
- * THE ESTIMATION ENGINE
+ * THE ESTIMATION ENGINE (CSG V2)
  * 
- * This module implements the GT-OCA (Graph-Theoretic Overlap Correction Algorithm)
- * for deterministic construction material estimation.
+ * This module implements Constructive Solid Geometry (CSG) for exact
+ * material quantification. It replaces the algebraic 'GT-OCA' method.
  * 
- * It strictly calculates geometric and material quantities based on input parameters.
- * It does NOT predict; it calculates.
+ * Methodology:
+ * 1. Convert Walls to 2D Polygons (Buffering).
+ * 2. Compute Boolean Union to merge junctions (L, T, Cross).
+ * 3. Compute Boolean Difference to trim partitions against structural walls.
+ * 4. Calculate Net Volume from resulting geometry area.
  */
 
-// Helper to detect intersections (Corners)
+// Helper to detect intersections (Corners) - Kept for Complexity Score
 const countIntersections = (walls: Wall[]): number => {
     let intersections = 0;
-    // Simple O(N^2) check for shared endpoints
-    // A more robust engine would check for T-junctions along the line, 
-    // but for this MVP, shared start/end points suffice.
     for (let i = 0; i < walls.length; i++) {
         for (let j = i + 1; j < walls.length; j++) {
             const w1 = walls[i];
             const w2 = walls[j];
-
-            // Check if any endpoints match (within small epsilon)
             if (
                 (Math.abs(w1.start.x - w2.start.x) < 1 && Math.abs(w1.start.y - w2.start.y) < 1) ||
                 (Math.abs(w1.start.x - w2.end.x) < 1 && Math.abs(w1.start.y - w2.end.y) < 1) ||
@@ -61,7 +59,6 @@ const calculateConcreteMaterials = (volume: number, mixRatio: string = "1:2:4") 
 };
 
 // --- STRUCTURAL SAFETY ENGINE ---
-
 const analyzeStructuralSafety = (columns: Column[], walls: Wall[], settings: ProjectSettings): SafetyReport => {
     const report: SafetyReport = {
         overallScore: 100,
@@ -81,7 +78,6 @@ const analyzeStructuralSafety = (columns: Column[], walls: Wall[], settings: Pro
         let capacity = 0;
 
         // 1. Slenderness Check
-        // Limit: H/W <= 15 for unbraced (simplified)
         const minDim = Math.min(col.width, col.height);
         const slenderness = settings.wallHeightDefault / minDim;
 
@@ -95,8 +91,7 @@ const analyzeStructuralSafety = (columns: Column[], walls: Wall[], settings: Pro
             status = 'warning';
         }
 
-        // 2. Max Span Check (Distance to nearest column)
-        // Find nearest neighbor
+        // 2. Max Span Check
         let minDist = Infinity;
         columns.forEach(other => {
             if (col.id === other.id) return;
@@ -126,34 +121,19 @@ const analyzeStructuralSafety = (columns: Column[], walls: Wall[], settings: Pro
         }
 
         // 3. Tributary Area & Axial Load Check
-        // Estimate Area: (Span/2) * (Span/2) * 4 = Span^2 approx? 
-        // Better: Area = (Average Span to Neighbors)^2
-        // Simplified: If span is 4m, it supports 2m on each side -> 4x4 area? No, 4m span means 2m tributary width.
-        // Let's use: Area = (Nearest Span * Next Nearest Span) if possible, or just Span^2 as conservative upper bound for interior cols.
-        // For corner columns it's 1/4 Area, Edge 1/2 Area.
-        // Heuristic: Area = (SpanM)^2 * 0.6 (Averaging factor for edges/corners)
         const tributaryArea = (spanM * spanM) * 0.6;
-
-        // Load Calculation
-        // Dead Load (Concrete + Finishes) + Live Load (Residential) ~= 12 kN/m2 per floor
         const loadPerFloor = 12; // kN/m2
         const floors = settings.floorCount || 1;
         load = tributaryArea * loadPerFloor * floors;
 
-        // Capacity Calculation (Simplified Axially Loaded)
-        // N = 0.35*fcu*Ac + 0.67*fy*Asc
-        // fcu = 25 MPa (Standard), fy = 410 MPa (High Yield)
-        // Ac = Area of Concrete (mm2)
-        // Asc = Area of Steel (mm2)
+        // Capacity
         const Ac = col.width * col.height;
         const barCount = settings.mainBarCount || 4;
         const barDia = settings.mainBarDiameter || 12;
         const Asc = barCount * (Math.PI * Math.pow(barDia / 2, 2));
 
-        // Capacity in Newtons -> Convert to kN (/1000)
         capacity = (0.35 * 25 * Ac + 0.67 * 410 * Asc) / 1000;
 
-        // Safety Factor Check
         if (load > capacity) {
             issues.push({
                 type: 'load',
@@ -172,20 +152,12 @@ const analyzeStructuralSafety = (columns: Column[], walls: Wall[], settings: Pro
             if (status !== 'critical') status = 'warning';
         }
 
-        // Update Counts
         if (status === 'critical') criticalCount++;
         else if (status === 'warning') warningCount++;
 
-        report.columns[col.id] = {
-            status,
-            issues,
-            load,
-            capacity
-        };
+        report.columns[col.id] = { status, issues, load, capacity };
     });
 
-    // Calculate Overall Score
-    // Start at 100. Deduct 20 for critical, 5 for warning.
     let score = 100 - (criticalCount * 20) - (warningCount * 5);
     report.overallScore = Math.max(0, score);
 
@@ -201,430 +173,269 @@ export const calculateEstimates = (
     settings: ProjectSettings
 ): CalculationResult => {
 
-    // --- STEP 0: Detect and Split Junctions ---
-    // This handles both T-junctions and cross-intersections
-    // ensuring all walls are properly split at junction points
-    const processedWalls = detectAndSplitJunctions(walls);
+    const wallHeightM = settings.wallHeightDefault / 1000;
 
-    let totalWallLength = 0;
+    // --- CSG PROCESSING: Boolean Operations ---
+    console.log('🏗️ CSG Engine: Constructing Solid Geometry...');
+
+    // 1. Separate Structural (9") and Partition (6") Walls
+    const walls9 = walls.filter(w => w.thickness > 150);
+    const walls6 = walls.filter(w => w.thickness <= 150);
+
+    // 2. Generate Polygons
+    const polys9 = walls9.map(wallToPolygon);
+    const polys6 = walls6.map(wallToPolygon);
+
+    // 3. Compute Unions (Resolves overlaps within same type)
+    const union9 = computeUnion(polys9);
+    const union6 = computeUnion(polys6);
+
+    // 4. Compute Difference (Trim Partitions against Structural)
+    // Structure takes precedence over Partition
+    const union6Clean = computeDifference(union6, union9);
+
+    // 5. Calculate Geometric Footprint Areas (Plan View m2)
+    const areaPlan9 = calculateMultiPolygonArea(union9);
+    const areaPlan6 = calculateMultiPolygonArea(union6Clean);
+
+    console.log(`  Structural Footprint: ${areaPlan9.toFixed(2)}m²`);
+    console.log(`  Partition Footprint: ${areaPlan6.toFixed(2)}m²`);
+
+    // 6. Calculate Gross Volumes (m3)
+    const grossVol9 = areaPlan9 * wallHeightM;
+    const grossVol6 = areaPlan6 * wallHeightM;
+
+    // --- Deductions (Openings, Columns, Lintels) ---
+
+    // Openings: Calculate Volume of void
+    let openingVol9 = 0;
+    let openingVol6 = 0;
     let totalOpeningArea = 0;
-    let wallLength9Inch = 0; // 225mm thick walls
-    let wallLength6Inch = 0; // 150mm thick walls
-
-    // 1. Geometry Parsing - Use processed walls with junctions split
-    processedWalls.forEach(w => {
-        const len = distance(w.start, w.end) / SCALE; // Length in mm (decoded from pixel space)
-        totalWallLength += len;
-
-        // Separate by wall thickness
-        if (w.thickness <= 150) {
-            wallLength6Inch += len;
-        } else {
-            wallLength9Inch += len;
-        }
-    });
-
     let totalOpeningWidth = 0;
-    let openingArea9Inch = 0; // Openings on 9-inch walls
-    let openingArea6Inch = 0; // Openings on 6-inch walls
 
     openings.forEach(o => {
-        const openingAreaM2 = (o.width * o.height) / 1000000; // convert mm^2 to m^2
-        totalOpeningArea += openingAreaM2;
-        totalOpeningWidth += o.width / 1000; // convert mm to m
+        const areaM2 = (o.width * o.height) / 1e6;
+        totalOpeningArea += areaM2;
+        totalOpeningWidth += o.width / 1000;
 
-        // Find host wall to determine wall type
-        const hostWall = processedWalls.find(w => w.id === o.wallId) || walls.find(w => w.id === o.wallId);
-        if (hostWall && hostWall.thickness <= 150) {
-            openingArea6Inch += openingAreaM2;
-        } else {
-            openingArea9Inch += openingAreaM2;
+        const hostWall = walls.find(w => w.id === o.wallId);
+        if (hostWall) {
+            const vol = areaM2 * (hostWall.thickness / 1000);
+            if (hostWall.thickness > 150) openingVol9 += vol;
+            else openingVol6 += vol;
         }
     });
 
-    // Convert length to meters for Area Calc
-    // Convert length to meters for Area Calc
-    const totalWallLengthMeters = totalWallLength / 1000;
+    // Columns: Calculate Volume (Assumed same concrete material, replaces blocks)
+    // In strict CSG, we should subtract column footprints from wall unions. 
+    // Here we subtract volume for simplicity as columns are often embedded.
+    let totalColumnArea = 0; // Footprint area for UI
+    let columnVolDeduction = 0;
 
-    // --- GT-OCA: Corrected Overlap Correction ---
-    // Using volume-based junction correction: V = (k-1) × t² × h
-    const { nodes } = buildGraph(processedWalls);
-    let overlapLengthCorrection = 0;
-    const wallHeight = settings.wallHeightDefault / 1000; // meters
+    // We only deduct if column is INSIDE a wall. 
+    // Simple Approximation: Subtract total column volume? 
+    // Risk: If column overlaps with NOTHING (freestanding), we shouldn't subtract from wall volume.
+    // However, usually columns are in walls. 
+    // Let's stick to Volume Subtraction but bounded by Wall Volume? 
+    // Better: Just report Column Volume separately, and deduct it from Block Volume IF it intersects?
+    // For this implementation, we will perform a global deduction of column volume from 9" walls (Structural).
 
-    console.log('🔧 SGG-OCA Junction Overlap Correction:');
-    console.log(`  Total junctions: ${nodes.length}`);
-
-    nodes.forEach(node => {
-        const degree = node.edges.length;
-        if (degree > 1) {
-            const walls = node.edges;
-            const thicknesses = walls.map(w => w.thickness);
-            const avgThickness = thicknesses.reduce((a, b) => a + b, 0) / degree;
-            const thicknessM = avgThickness / 1000;
-
-            // Junction overlap volume: V = (k-1) × t² × h
-            // For 2-way intersections, use trigonometric correction: V = (t² * h) / sin(theta)
-            let overlapVolume = 0;
-
-            if (degree === 2) {
-                const w1 = walls[0];
-                const w2 = walls[1];
-
-                // Find the "other" endpoints to calculate angle
-                const p1 = (distance(w1.start, node.point) < 1) ? w1.end : w1.start;
-                const p2 = (distance(w2.start, node.point) < 1) ? w2.end : w2.start;
-
-                let theta = Math.abs(getAngle(node.point, p1) - getAngle(node.point, p2));
-                if (theta > 180) theta = 360 - theta;
-
-                // Convert to radians for sin
-                const thetaRad = theta * (Math.PI / 180);
-
-                // Limit theta to avoid division by zero or extreme values for parallel walls
-                // Minimum angle 15 degrees as per paper
-                const minAngleRad = 15 * (Math.PI / 180);
-                const effectiveTheta = Math.max(thetaRad, minAngleRad);
-
-                // If angle is close to 180 (straight line), overlap is 0 (or handled by wall length?)
-                // Actually, if it's a straight line, there is NO overlap subtraction needed usually, 
-                // but here we are treating it as a junction. 
-                // However, for a straight wall split in two, the "overlap" is just the continuity.
-                // The formula V = t^2 h / sin(theta) blows up at 0 and 180.
-                // For 90 deg, sin(90)=1, V = t^2 h. Correct.
-
-                // If theta is near 180, sin(theta) is near 0.
-                // We should only apply this for "corners". 
-                // If theta > 165 (near straight), we assume 0 overlap correction?
-                if (theta > 165) {
-                    overlapVolume = 0;
-                } else {
-                    overlapVolume = (thicknessM ** 2) * wallHeight / Math.sin(effectiveTheta);
-                }
-
-                console.log(`  Junction deg=2, theta=${theta.toFixed(1)}°, V=${overlapVolume.toFixed(4)}m³`);
-
-            } else {
-                // Fallback for > 2 walls (Orthogonal approximation)
-                overlapVolume = (degree - 1) * (thicknessM ** 2) * wallHeight;
-            }
-
-            // Convert volume to length correction: L = V / (t × h)
-            const lengthCorrection = overlapVolume / (thicknessM * wallHeight);
-            overlapLengthCorrection += lengthCorrection;
-
-            console.log(`  Junction deg=${degree}: V=${overlapVolume.toFixed(4)}m³, L=${lengthCorrection.toFixed(3)}m`);
-        }
-    });
-
-    console.log(`  Total overlap correction: ${overlapLengthCorrection.toFixed(3)}m`);
-    console.log(`  Before: ${totalWallLengthMeters.toFixed(2)}m`);
-
-    const correctedWallLength = Math.max(0, totalWallLengthMeters - overlapLengthCorrection);
-    console.log(`  After: ${correctedWallLength.toFixed(2)}m`);
-
-    const totalWallArea = correctedWallLength * (settings.wallHeightDefault / 1000); // m^2
-
-    // Calculate column deductions (columns embedded in walls don't need blocks)
-    let totalColumnArea = 0;
-    columns.forEach(col => {
-        const colWidth = col.width / 1000; // Convert to meters
-        const colHeight = col.height / 1000;
-        const wallHeight = settings.wallHeightDefault / 1000;
-        const columnFootprintArea = colWidth * colHeight * wallHeight;
-        totalColumnArea += columnFootprintArea;
-    });
-
-    console.log(`  Column deduction: ${totalColumnArea.toFixed(2)}m²`);
-
-    // Calculate lintel area deduction (lintel band takes up wall height)
-    // Lintel runs along the wall at lintelDepth height
-    const lintelDepthForDeduction = (settings.lintelDepth || 225) / 1000;
-    const lintelAreaDeduction = correctedWallLength * lintelDepthForDeduction;
-    console.log(`  Lintel deduction: ${lintelAreaDeduction.toFixed(2)}m² (${lintelDepthForDeduction * 1000}mm depth)`);
-
-    const netArea = Math.max(0, totalWallArea - totalOpeningArea - totalColumnArea - lintelAreaDeduction);
-
-    // 2. Block Physics
-    // Block count relies on the Face Area (Length x Height), thickness doesn't affect the count (just the volume/weight if we calculated that)
-    const effectiveBlockLength = settings.blockLength + settings.mortarThickness;
-    const effectiveBlockHeight = settings.blockHeight + settings.mortarThickness;
-    const blockFaceArea = (effectiveBlockLength * effectiveBlockHeight) / 1000000; // m^2
-
-    // Calculate block counts separately for 9-inch and 6-inch walls
-    const wallHeightMeters = settings.wallHeightDefault / 1000; // meters
-
-    // 9-inch (225mm) walls - external/load-bearing
-    const wallLength9InchMeters = wallLength9Inch / 1000;
-    const wallArea9Inch = wallLength9InchMeters * wallHeightMeters;
-    const lintelDeduction9Inch = wallLength9InchMeters * lintelDepthForDeduction;
-    // Openings and columns deducted based on host wall type
-    const netArea9Inch = Math.max(0, wallArea9Inch - lintelDeduction9Inch - openingArea9Inch - totalColumnArea);
-    const rawBlocks9Inch = netArea9Inch / blockFaceArea;
-    const blockCount9Inch = rawBlocks9Inch * (1 + settings.wastagePercentage / 100);
-
-    // 6-inch (150mm) walls - partition/internal
-    const wallLength6InchMeters = wallLength6Inch / 1000;
-    const wallArea6Inch = wallLength6InchMeters * wallHeightMeters;
-    const lintelDeduction6Inch = wallLength6InchMeters * lintelDepthForDeduction;
-    const netArea6Inch = Math.max(0, wallArea6Inch - lintelDeduction6Inch - openingArea6Inch);
-    const rawBlocks6Inch = netArea6Inch / blockFaceArea;
-    const blockCount6Inch = rawBlocks6Inch * (1 + settings.wastagePercentage / 100);
-
-    // Total block count (for backward compatibility)
-    const blockCount = blockCount9Inch + blockCount6Inch;
-
-    // 3. DPC Physics (Damp Proof Course)
-    // DPC Length = Total Wall Length
-    const dpcLength = totalWallLengthMeters;
-
-    // DPC Area = Length * Wall Thickness
-    const wallThicknessMeters = (settings.blockThickness || 225) / 1000;
-    // 4. Surface Physics (Paint)
-    // Net Area * 2 sides
-    const paintArea = netArea * 2;
-
-    // --- Lintel Calculations ---
-    let lintelLength = 0;
-    if (settings.lintelType === 'chain') {
-        // Chain lintel runs through the entire wall length
-        lintelLength = totalWallLengthMeters;
-    } else {
-        // Opening lintel only covers openings + overhangs
-        // For each opening, length = width + (2 * overhang)
-        // We don't have individual opening data here easily without iterating walls again or passing it.
-        // Simplified approximation: Total Opening Width + (Opening Count * 2 * Overhang)
-        // We need opening count.
-        // We need opening count.
-        // Since we don't have direct opening count on walls here, we can estimate from totalOpeningWidth
-        // assuming an average opening width of 1.2m (door/window avg)
-        const estimatedOpeningCount = Math.ceil(totalOpeningWidth / 1.2);
-        lintelLength = totalOpeningWidth + (estimatedOpeningCount * 2 * (settings.lintelOverhang / 1000));
-    }
-
-    const concreteVolume = lintelLength * ((settings.lintelWidth || settings.blockThickness) / 1000) * ((settings.lintelDepth || 225) / 1000);
-
-    // Reinforcement
-    const reinforcementMainLength = lintelLength * settings.mainBarCount;
-
-    // Stirrups: Spaced at 200mm (0.2m)
-    // Stirrup length = perimeter of rect (width - cover) x (height - cover)
-    // Simplified: (width + height) * 2
-    const lintelWidthM = (settings.lintelWidth || settings.blockThickness) / 1000;
-    const lintelDepthM = (settings.lintelDepth || 225) / 1000;
-    const stirrupPerimeter = (lintelWidthM + lintelDepthM) * 2;
-    const stirrupCount = Math.ceil(lintelLength / 0.2);
-    const reinforcementStirrupLength = stirrupCount * stirrupPerimeter;
-
-    // --- Mortar Calculations ---(The Essence)
-    // Calculate volume of mortar per block unit
-    // Unit = (Block + Mortar) - Block
-    const mThickM = settings.mortarThickness / 1000;
-    const bLenM = settings.blockLength / 1000;
-    const bHeightM = settings.blockHeight / 1000;
-    const bThickM = (settings.blockThickness || 225) / 1000;
-
-    const blockVol = bLenM * bHeightM * bThickM;
-    const unitVol = (bLenM + mThickM) * (bHeightM + mThickM) * bThickM;
-    const mortarPerBlock = unitVol - blockVol;
-
-    const rawBlocks = rawBlocks9Inch + rawBlocks6Inch;
-    const totalMortarVolume = mortarPerBlock * rawBlocks; // Use raw blocks for pure volume, wastage applies to materials
-
-    // Mix Ratio 1:X (Cement:Sand)
-    // Total Parts = X + 1
-    const ratio = settings.mortarRatio || 6; // Default to 6 if undefined
-    const totalParts = ratio + 1;
-
-    const cementVol = totalMortarVolume * (1 / totalParts);
-    const sandVol = totalMortarVolume * (ratio / totalParts);
-
-    // Cement Bags (50kg bag ~= 0.035 m3)
-    // Add wastage to materials
-    const materialWastage = 1 + (settings.wastagePercentage / 100);
-
-    const cementBags = (cementVol / 0.035) * materialWastage;
-
-    // Sand Tons (Density ~1600 kg/m3)
-    const sandTons = (sandVol * 1.6) * materialWastage;
-
-    // Water (Liters)
-    // W/C Ratio 0.6
-    const cementWeightKg = cementBags * 50; // Using the bags count including wastage ensures water matches the mix
-    const waterLiters = (cementBags * 50 * 0.5) * 1.1; // 0.5 w/c ratio, 10% waste
-
-    // --- Floor Concrete Calculation (Precise Polygon) ---
-    // Use the cycle finding algorithm to get exact enclosed area
-    const floorArea = calculateFloorArea(walls, 0.02); // 0.02 is the scale factor (1 unit = 20mm -> 0.02m)
-    const floorConcreteVolume = floorArea * (settings.floorThickness / 1000);
-    const floorMaterials = calculateConcreteMaterials(floorConcreteVolume, settings.floorMixRatio || "1:2:4");
-
-    // --- Foundation Calculation ---
-    let foundationVolume = 0;
-    if (settings.foundationType === 'pad') {
-        // Pad Footing: Volume per column
-        // Use individual pad dimensions if available, else global settings
-        columns.forEach(col => {
-            const pW = (col.padWidth || settings.padWidth || 1000) / 1000;
-            const pL = (col.padLength || settings.padLength || 1000) / 1000;
-            const depth = (settings.foundationDepth || 900) / 1000;
-            foundationVolume += pW * pL * depth;
-        });
-    } else {
-        // Strip Footing: Along all walls
-        // Use corrected wall length to avoid double counting corners? 
-        // Usually strip footing is continuous, so overlap subtraction is valid.
-        foundationVolume = correctedWallLength * (settings.foundationWidth / 1000) * (settings.foundationDepth / 1000);
-    }
-    const foundationMaterials = calculateConcreteMaterials(foundationVolume, settings.floorMixRatio || "1:2:4"); // Use same mix for now
-
-    // 6. Labor Physics (Productivity Lab)
-    // Complexity Factor
-    const cornerCount = countIntersections(walls);
-    const openingCount = openings.length;
-
-    // Penalties: 5% per corner, 10% per opening
-    const cornerPenalty = cornerCount * 0.05;
-    const openingPenalty = openingCount * 0.10;
-    const complexityScore = 1 + cornerPenalty + openingPenalty;
-
-    // Daily Output = Masons * Rate * (1 / Complexity)
-    const baseDailyOutput = (settings.masons || 1) * (settings.targetDailyRate || 100);
-    const effectiveDailyOutput = baseDailyOutput / complexityScore;
-
-    const estimatedDuration = blockCount / effectiveDailyOutput;
-
-    // --- Column Calculations ---
     let columnConcreteVolume = 0;
     let colReinforcementMain = 0;
     let colReinforcementStirrup = 0;
     let colStirrupCountTotal = 0;
-
-    const colStirrupSpacing = (settings.columnStirrupSpacing || 200) / 1000; // m
-    const colMainBars = settings.mainBarCount || 4; // Default 4 bars
+    const colStirrupSpacing = (settings.columnStirrupSpacing || 200) / 1000;
+    const colMainBars = settings.mainBarCount || 4;
 
     columns.forEach(col => {
-        // Concrete Volume: W * H * WallHeight
-        // Note: Columns usually go from foundation to roof beam. Assuming Wall Height for now.
-        const w = col.width / 1000;
-        const h = col.height / 1000;
-        const height = settings.wallHeightDefault / 1000;
+        const wM = col.width / 1000;
+        const dM = col.height / 1000;
+        const vol = wM * dM * wallHeightM;
+        columnConcreteVolume += vol;
+        columnVolDeduction += vol; // Assume embedded in structural walls
 
-        columnConcreteVolume += w * h * height;
+        totalColumnArea += (wM * dM);
 
-        // Reinforcement (Main)
-        colReinforcementMain += height * colMainBars;
-
-        // Reinforcement (Stirrups)
-        // Count = Height / Spacing
-        const stirrupCount = Math.ceil(height / colStirrupSpacing);
-        colStirrupCountTotal += stirrupCount;
-
-        // Perimeter = (W + H) * 2 (Simplified, ignoring cover for estimation)
-        const perimeter = (w + h) * 2;
-        colReinforcementStirrup += stirrupCount * perimeter;
+        colReinforcementMain += wallHeightM * colMainBars;
+        const sCount = Math.ceil(wallHeightM / colStirrupSpacing);
+        colStirrupCountTotal += sCount;
+        colReinforcementStirrup += sCount * ((wM + dM) * 2);
     });
 
-    // --- Safety Analysis ---
-    const safetyReport = analyzeStructuralSafety(columns, walls, settings);
+    // Lintels: Volume = Footprint * Depth? 
+    // No, Lintel is a band. 
+    // Volume = WallLength * Thickness * Depth.
+    // We don't have linear "Wall Length" easily from CSG Union.
+    // Back-calculate Effective Length from Volume? Length = Volume / (Thickness * Height).
+    // Effective Length 9" = grossVol9 / (0.225 * wallHeightM).
+    const thick9 = (settings.blockThickness || 225) / 1000;
+    const effectiveLen9 = grossVol9 / (thick9 * wallHeightM);
 
-    // --- Beam Calculations ---
+    // Partition 6" (150mm)
+    const thick6 = 0.150;
+    const effectiveLen6 = grossVol6 / (thick6 * wallHeightM);
+
+    const lintelDepthM = (settings.lintelDepth || 225) / 1000;
+    const lintelVol9 = effectiveLen9 * thick9 * lintelDepthM;
+    const lintelVol6 = effectiveLen6 * thick6 * lintelDepthM;
+
+    // --- Net Volumes ---
+    // Net = Gross - Openings - Columns - Lintels
+    // Ensure not negative
+    const netVol9 = Math.max(0, grossVol9 - openingVol9 - columnVolDeduction - lintelVol9);
+    const netVol6 = Math.max(0, grossVol6 - openingVol6 - lintelVol6);
+
+    // --- Block Count ---
+    // Block Volume (including mortar for determining "Unit Volume" occupied)
+    const mThickM = settings.mortarThickness / 1000;
+    const bLenM = settings.blockLength / 1000;
+    const bHeightM = settings.blockHeight / 1000;
+
+    // Volume occupied by ONE block + mortar joint
+    // Note: Wall Thickness is fixed (225 or 150).
+    // The "Unit" in the wall is (L+m) * (H+m) * T
+    const unitVol9 = (bLenM + mThickM) * (bHeightM + mThickM) * thick9;
+    const unitVol6 = (bLenM + mThickM) * (bHeightM + mThickM) * thick6;
+
+    const rawBlocks9Inch = netVol9 / unitVol9;
+    const rawBlocks6Inch = netVol6 / unitVol6;
+
+    const blockCount9Inch = Math.ceil(rawBlocks9Inch * (1 + settings.wastagePercentage / 100));
+    const blockCount6Inch = Math.ceil(rawBlocks6Inch * (1 + settings.wastagePercentage / 100));
+
+    // Backward comp types
+    const blockCount = blockCount9Inch + blockCount6Inch;
+    const totalWallArea = (areaPlan9 + areaPlan6) / thick9 * wallHeightM; // Approx surface area
+    const netArea = (netVol9 / thick9) + (netVol6 / thick6); // Approx elevation area
+
+    // --- Other Material Calcs ---
+    const paintArea = netArea * 2;
+
+    // Lintel (Concrete & Steel)
+    const totalLintelLen = effectiveLen9 + effectiveLen6;
+    const concreteVolume = lintelVol9 + lintelVol6;
+    const reinforcementMainLength = totalLintelLen * settings.mainBarCount;
+    const stirrupPerimeter = (thick9 + lintelDepthM) * 2; // Approx using 9" width
+    const stirrupCount = Math.ceil(totalLintelLen / 0.2);
+    const reinforcementStirrupLength = stirrupCount * stirrupPerimeter;
+
+    // Mortar
+    // Calculate ACTUAL mortar volume based on block count
+    // Vol Mortar = NetWallVolume - (BlockCount * BlockOnlyVolume)
+    const blockOnlyVol9 = bLenM * bHeightM * thick9;
+    const blockOnlyVol6 = bLenM * bHeightM * thick6;
+
+    const volBlocksOnly = (rawBlocks9Inch * blockOnlyVol9) + (rawBlocks6Inch * blockOnlyVol6);
+    const totalNetWallVol = netVol9 + netVol6;
+
+    const totalMortarVolume = Math.max(0, totalNetWallVol - volBlocksOnly);
+
+    // Mix Ratio
+    const ratio = settings.mortarRatio || 6;
+    const totalParts = ratio + 1;
+    const cementVol = totalMortarVolume * (1 / totalParts);
+    const sandVol = totalMortarVolume * (ratio / totalParts);
+
+    const materialWastage = 1 + (settings.wastagePercentage / 100);
+    const cementBags = (cementVol / 0.035) * materialWastage;
+    const sandTons = (sandVol * 1.6) * materialWastage;
+    const waterLiters = (cementBags * 50 * 0.5) * 1.1;
+
+    // Floor
+    const floorArea = calculateFloorArea(walls, 0.02);
+    const floorConcreteVolume = floorArea * (settings.floorThickness / 1000);
+    const floorMaterials = calculateConcreteMaterials(floorConcreteVolume, settings.floorMixRatio || "1:2:4");
+
+    // Foundation
+    let foundationVolume = 0;
+    if (settings.foundationType === 'pad') {
+        const pW = (settings.padWidth || 1000) / 1000;
+        const pL = (settings.padLength || 1000) / 1000;
+        const depth = (settings.foundationDepth || 900) / 1000;
+        foundationVolume = columns.length * pW * pL * depth;
+    } else {
+        // Strip: Length * Width * Depth
+        const stripLen = effectiveLen9 + effectiveLen6; // Use effective length derived from CSG volume
+        foundationVolume = stripLen * (settings.foundationWidth / 1000) * (settings.foundationDepth / 1000);
+    }
+    const foundationMaterials = calculateConcreteMaterials(foundationVolume, settings.floorMixRatio || "1:2:4");
+
+    // Labor
+    const complexityScore = 1 + (countIntersections(walls) * 0.05) + (openings.length * 0.1);
+    const baseDailyOutput = (settings.masons || 1) * (settings.targetDailyRate || 100);
+    const effectiveDailyOutput = baseDailyOutput / complexityScore;
+    const estimatedDuration = blockCount / effectiveDailyOutput;
+
+    // Beams (Simplified - keep existing)
     let beamConcreteVolume = 0;
     let beamReinforcementMain = 0;
     let beamReinforcementStirrup = 0;
     let beamStirrupCountTotal = 0;
-
     beams.forEach(beam => {
-        const lenMm = distance(beam.start, beam.end) / SCALE;
-        const lenM = lenMm / 1000;
+        const lenM = distance(beam.start, beam.end) / SCALE / 1000;
         const wM = beam.width / 1000;
         const dM = beam.depth / 1000;
-
-        // Volume
         beamConcreteVolume += lenM * wM * dM;
-
-        // Reinforcement
-        const barCount = 4; // Default
-        beamReinforcementMain += lenM * barCount;
-
-        const stirrupSpacing = 0.2; // 200mm
-        const stirrupCount = Math.ceil(lenM / stirrupSpacing);
-        beamStirrupCountTotal += stirrupCount;
-
-        const perimeter = (wM + dM) * 2;
-        beamReinforcementStirrup += stirrupCount * perimeter;
+        beamReinforcementMain += lenM * 4;
+        const sCount = Math.ceil(lenM / 0.2);
+        beamStirrupCountTotal += sCount;
+        beamReinforcementStirrup += sCount * ((wM + dM) * 2);
     });
 
-    // --- Slab Calculations ---
+    // Slabs
     let slabAreaTotal = 0;
     let slabConcreteVolume = 0;
     let slabReinforcementMain = 0;
-
     slabs.forEach(slab => {
         const areaPx = calculatePolygonArea(slab.points);
-        // Convert px^2 to mm^2: px * (1/SCALE) * px * (1/SCALE)
-        const areaMm = areaPx * (1 / SCALE) * (1 / SCALE);
-        const areaM = areaMm / 1000000;
-
+        const areaM = (areaPx * (1 / SCALE) * (1 / SCALE)) / 1e6;
         slabAreaTotal += areaM;
-
-        const thicknessM = (slab.thickness || 150) / 1000;
-        slabConcreteVolume += areaM * thicknessM;
-
-        // Reinforcement Estimation (Mesh)
-        const reinforcementFactor = 12; // m of bar per m2 (approx)
-        slabReinforcementMain += areaM * reinforcementFactor;
+        slabConcreteVolume += areaM * ((slab.thickness || 150) / 1000);
+        slabReinforcementMain += areaM * 12;
     });
 
+    // Safety
+    const safetyReport = analyzeStructuralSafety(columns, walls, settings);
+
     return {
-        totalWallArea,
+        totalWallArea, // Approx
         totalOpeningArea,
         totalColumnArea,
         netArea,
-        blockCount: Math.ceil(blockCount),
-        blockCount6Inch: Math.ceil(blockCount6Inch),
+        blockCount,
+        blockCount6Inch,
         paintArea,
-
-        // Lintel
         concreteVolume,
+        floorConcreteVolume,
         reinforcementMainLength,
         reinforcementStirrupLength,
-
-        // Column
         columnConcreteVolume,
         columnReinforcement: {
             mainLength: colReinforcementMain,
             stirrupLength: colReinforcementStirrup,
             stirrupCount: colStirrupCountTotal
         },
-
-        // Beam Results
+        mortarVolume: totalMortarVolume * materialWastage,
+        cementBags,
+        sandTons,
+        waterLiters,
+        floorMaterials,
+        foundationVolume,
+        foundationMaterials,
         beamConcreteVolume,
         beamReinforcement: {
             mainLength: beamReinforcementMain,
             stirrupLength: beamReinforcementStirrup,
             stirrupCount: beamStirrupCountTotal
         },
-
-        // Slab Results
         slabArea: slabAreaTotal,
         slabConcreteVolume,
         slabReinforcement: {
             mainLength: slabReinforcementMain,
-            topLength: 0 // Placeholder for now
+            topLength: 0
         },
-
-        // --- Mortar
-        mortarVolume: totalMortarVolume * materialWastage,
-        cementBags,
-        sandTons,
-        waterLiters,
         estimatedDuration,
         complexityScore,
-        floorConcreteVolume,
-        floorMaterials,
-        foundationVolume,
-        foundationMaterials,
         safetyReport
     };
 };

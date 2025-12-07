@@ -2,6 +2,7 @@
 import React from 'react';
 import { ChevronRight, ChevronLeft, Eye, X, CheckCircle2, AlertTriangle, ChevronDown, Settings } from 'lucide-react';
 import { ProjectSettings, CalculationResult, ToolMode, ToolSettings, GroundTruth, ProjectLabel, ProjectMeta, Column, Wall, Opening } from '../types';
+import { GeometricIssue } from '../utils/validation';
 import PriceComparison from './PriceComparison';
 
 interface SidebarProps {
@@ -24,6 +25,7 @@ interface SidebarProps {
   columns: Column[];
   walls: Wall[];
   openings: Opening[];
+  geometricIssues?: GeometricIssue[];
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -38,7 +40,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   setIsOpen,
   groundTruth,
   setGroundTruth,
-  meta
+  meta,
+  geometricIssues = []
 }) => {
 
   const handleGroundTruthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -87,8 +90,30 @@ const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
+
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-hide">
+
+          {/* Validation Warnings (Section 2.6) */}
+          {geometricIssues.length > 0 && (
+            <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-4 animate-pulse">
+              <h3 className="text-red-400 font-bold flex items-center gap-2 mb-2">
+                <AlertTriangle size={18} />
+                Geometry Issues ({geometricIssues.length})
+              </h3>
+              <ul className="space-y-1">
+                {geometricIssues.slice(0, 3).map((issue, idx) => (
+                  <li key={idx} className="text-xs text-red-300 flex items-start gap-1">
+                    <span className="mt-0.5">•</span>
+                    <span>{issue.message}</span>
+                  </li>
+                ))}
+                {geometricIssues.length > 3 && (
+                  <li className="text-xs text-red-500 italic">+ {geometricIssues.length - 3} more issues...</li>
+                )}
+              </ul>
+            </div>
+          )}
 
           {/* Main Metric - 9" BLOCKS (External/Load-bearing) */}
           <div className="metric-card bg-brand-900/30 rounded-xl p-5 border border-brand-500/30 text-center gradient-border">

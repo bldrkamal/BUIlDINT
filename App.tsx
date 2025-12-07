@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Wall, Opening, ProjectSettings, ToolMode, CalculationResult, ToolSettings, GroundTruth, ProjectMeta, ProjectData, ProjectLabel, Column, Beam, Slab } from './types';
 import { calculateEstimates } from './utils/estimationEngine';
+import { validateGeometry } from './utils/validation';
 import { compileGraphData } from './utils/graphCompiler';
 import Toolbar from './components/Toolbar';
 import Sidebar from './components/Sidebar';
@@ -544,6 +545,7 @@ const App: React.FC = () => {
           />
         </div>
 
+
         <Sidebar
           activeTool={tool}
           settings={settings}
@@ -564,6 +566,7 @@ const App: React.FC = () => {
           columns={columns}
           walls={walls}
           openings={openings}
+          geometricIssues={useMemo(() => validateGeometry(walls), [walls])}
         />
 
         {isSketchUploaderOpen && (
