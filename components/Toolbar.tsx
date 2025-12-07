@@ -16,9 +16,10 @@ import {
   Scissors,
   Spline,
   Square,
-  Database
+  Database,
+  Camera
 } from 'lucide-react';
-import { ToolMode } from '../types';
+import { ToolMode, ToolSettings, WallType } from '../types';
 
 interface ToolbarProps {
   activeTool: ToolMode;
@@ -31,6 +32,12 @@ interface ToolbarProps {
   onSave: () => void;
   onLoad: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onExportTrainingData: () => void;
+  onOpenSketchUpload: () => void;
+  toolSettings: ToolSettings;
+  setToolSettings: (s: ToolSettings) => void;
+  showOverlay?: boolean;
+  setShowOverlay?: (show: boolean) => void;
+  hasOverlay?: boolean;
 }
 
 const Toolbar: React.FC<ToolbarProps> = ({
@@ -43,8 +50,20 @@ const Toolbar: React.FC<ToolbarProps> = ({
   canUndo,
   onSave,
   onLoad,
-  onExportTrainingData
+  onExportTrainingData,
+  onOpenSketchUpload,
+  toolSettings,
+  setToolSettings,
+  showOverlay,
+  setShowOverlay,
+  hasOverlay
 }) => {
+  const toggleWallType = () => {
+    setToolSettings({
+      ...toolSettings,
+      wallType: toolSettings.wallType === 'external' ? 'partition' : 'external'
+    });
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Grouped Tools
@@ -74,12 +93,16 @@ const Toolbar: React.FC<ToolbarProps> = ({
     <button
       key={tool.id}
       onClick={(e) => {
-        e.stopPropagation(); // Prevent canvas from receiving click
+        e.stopPropagation();
+        // Trigger haptic feedback if available
+        if ('vibrate' in navigator) {
+          navigator.vibrate(10);
+        }
         setTool(tool.id as ToolMode);
       }}
-      className={`p-3 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg transition-all duration-200 group relative flex items-center justify-center
+      className={`tool-btn p-3 min-w-[48px] min-h-[48px] rounded-full md:rounded-lg transition-all duration-200 group relative flex items-center justify-center active:scale-95
         ${activeTool === tool.id
-          ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50'
+          ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50 tool-active'
           : 'text-slate-400 hover:bg-slate-700 hover:text-white'
         } `}
       title={tool.label}
@@ -113,6 +136,22 @@ const Toolbar: React.FC<ToolbarProps> = ({
       {/* Structure Group */}
       <div className="flex gap-1 md:flex-col md:gap-2">
         {structureTools.map(renderToolButton)}
+
+        {/* Wall Type Toggle - only visible when wall tool is active */}
+        {activeTool === 'wall' && (
+          <button
+            onClick={toggleWallType}
+            className={`p-2 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg transition-all duration-200 group relative flex flex-col items-center justify-center text-xs font-medium
+              ${toolSettings.wallType === 'partition'
+                ? 'bg-amber-600 text-white shadow-lg shadow-amber-900/50'
+                : 'bg-green-600 text-white shadow-lg shadow-green-900/50'
+              } `}
+            title={toolSettings.wallType === 'external' ? '9" External Wall (225mm)' : '6" Partition Wall (150mm)'}
+          >
+            <span className="font-bold">{toolSettings.wallType === 'external' ? '9"' : '6"'}</span>
+            <span className="text-[8px] opacity-80">{toolSettings.wallType === 'external' ? 'EXT' : 'INT'}</span>
+          </button>
+        )}
       </div>
 
       <div className="w-px h-8 bg-slate-700 md:w-8 md:h-px md:my-1" />
@@ -148,6 +187,24 @@ const Toolbar: React.FC<ToolbarProps> = ({
           </span>
         </button>
 
+        {/* Unit Selector */}
+        <div className="relative group">
+          <select
+            value={toolSettings.displayUnit}
+            onChange={(e) => setToolSettings({ ...toolSettings, displayUnit: e.target.value as 'mm' | 'm' | 'ft' | 'in' })}
+            className="p-2 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg bg-slate-700 text-white text-xs font-bold cursor-pointer border border-slate-600 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none text-center"
+            title="Display Unit"
+          >
+            <option value="mm">mm</option>
+            <option value="m">m</option>
+            <option value="ft">ft</option>
+            <option value="in">in</option>
+          </select>
+          <span className="hidden md:block absolute left-full ml-2 px-2 py-1 bg-black text-xs text-white rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+            Unit: {toolSettings.displayUnit.toUpperCase()}
+          </span>
+        </div>
+
         {/* File Operations */}
         <button
           onClick={onSave}
@@ -171,6 +228,42 @@ const Toolbar: React.FC<ToolbarProps> = ({
           className="hidden"
           accept=".json"
         />
+
+        <button
+          onClick={onOpenSketchUpload}
+          className="p-3 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg transition-all duration-200 text-pink-400 hover:bg-pink-900/30 hover:text-pink-200 group relative flex items-center justify-center"
+          title="AI Sketch Estimate"
+        >
+          <Camera size={20} className="md:w-6 md:h-6" />
+        </button>
+
+        {/* Overlay Toggle - only visible when there's an overlay */}
+        {hasOverlay && setShowOverlay && (
+          <button
+            onClick={() => setShowOverlay(!showOverlay)}
+            className={`p-3 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg transition-all duration-200 group relative flex items-center justify-center
+              ${showOverlay
+                ? 'bg-pink-600 text-white shadow-lg shadow-pink-900/50'
+                : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+              }`}
+            title={showOverlay ? 'Hide Sketch Overlay' : 'Show Sketch Overlay'}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="md:w-6 md:h-6">
+              {showOverlay ? (
+                <>
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="m9 9 6 6" />
+                  <path d="m15 9-6 6" />
+                </>
+              ) : (
+                <>
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M9 12h6" />
+                </>
+              )}
+            </svg>
+          </button>
+        )}
 
         <button
           onClick={onExportTrainingData}

@@ -31,6 +31,7 @@ interface CanvasProps {
     setSelectedId: React.Dispatch<React.SetStateAction<string | null>>;
     onUpdateSettings: React.Dispatch<React.SetStateAction<ProjectSettings>>;
     results?: CalculationResult;
+    sketchOverlay?: { image: string, width: number, height: number } | null;
 }
 
 // Convert MM to Pixels for display (Scale factor)
@@ -59,7 +60,8 @@ const Canvas: React.FC<CanvasProps> = ({
     selectedId,
     setSelectedId,
     onUpdateSettings,
-    results
+    results,
+    sketchOverlay
 }) => {
     const [isDrawing, setIsDrawing] = useState(false);
     const [points, setPoints] = useState<Point[]>([]);
@@ -436,7 +438,7 @@ const Canvas: React.FC<CanvasProps> = ({
                         id: generateId(),
                         start,
                         end,
-                        thickness: settings.blockThickness || 225,
+                        thickness: toolSettings.wallType === 'partition' ? 150 : 225,
                         height: settings.wallHeightDefault,
                     };
                     setWalls([...walls, newWall]);
@@ -1473,7 +1475,7 @@ const Canvas: React.FC<CanvasProps> = ({
                             id: generateId(),
                             start,
                             end: endRounded,
-                            thickness: settings.blockThickness || 225,
+                            thickness: toolSettings.wallType === 'partition' ? 150 : 225,
                             height: settings.wallHeightDefault,
                         };
                         setWalls([...walls, newWall]);
@@ -1527,7 +1529,7 @@ const Canvas: React.FC<CanvasProps> = ({
 
     // --- Render Helpers ---
 
-    const renderArchitecturalDimension = (start: Point, end: Point, text?: string, offset: number = 40, color: string = "#94a3b8", highlight: boolean = false) => {
+    const renderArchitecturalDimension = (start: Point, end: Point, text?: string, offset: number = 40, color: string = "#94a3b8", highlight: boolean = false, fontSizeOverride?: number) => {
         const dx = end.x - start.x;
         const dy = end.y - start.y;
         const angle = Math.atan2(dy, dx);
@@ -1553,7 +1555,7 @@ const Canvas: React.FC<CanvasProps> = ({
 
         const displayValue = text || Math.round(length / SCALE).toString();
 
-        const fontSize = 16; // Increased from default
+        const fontSize = fontSizeOverride || 16; // Use override or default
         const textWidth = (displayValue.length * 10) + 10;
         const textOffset = -10;
 
@@ -1618,6 +1620,10 @@ const Canvas: React.FC<CanvasProps> = ({
         if (textRot > 90) textRot -= 180;
         if (textRot <= -90) textRot += 180;
 
+        const isDoor = opening.type === 'door';
+        const doorColor = isSelected ? '#f97316' : '#a855f7';
+        const windowColor = isSelected ? '#f97316' : '#3b82f6';
+
         return (
             <g key={opening.id} transform={`translate(${cx}, ${cy})`}>
                 <g transform={`rotate(${angle})`}>
@@ -1625,27 +1631,100 @@ const Canvas: React.FC<CanvasProps> = ({
                     {isSelected && (
                         <rect x={-widthPx / 2 - 4} y={-heightPx / 2 - 4} width={widthPx + 8} height={heightPx + 8} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4,2" />
                     )}
+
+                    {/* Opening Background - clear the wall */}
                     <rect
                         x={-widthPx / 2}
                         y={-heightPx / 2}
                         width={widthPx}
                         height={heightPx}
                         fill="#1e293b"
-                        stroke={isSelected ? '#f97316' : (opening.type === 'door' ? '#a855f7' : '#3b82f6')}
-                        strokeWidth={isSelected ? 3 : 2}
                     />
-                    {opening.type === 'door' && (
-                        <path d={`M ${-widthPx / 2} ${heightPx / 2} Q ${-widthPx / 2} ${-widthPx} ${widthPx / 2} ${-heightPx / 2} `} fill="none" stroke={isSelected ? '#f97316' : "#a855f7"} strokeWidth={1} strokeDasharray="4 2" />
+
+                    {isDoor ? (
+                        /* ===== REALISTIC DOOR ===== */
+                        <>
+                            {/* Door Jambs (wall edges) */}
+                            <line x1={-widthPx / 2} y1={-heightPx / 2} x2={-widthPx / 2} y2={heightPx / 2} stroke={doorColor} strokeWidth={3} />
+                            <line x1={widthPx / 2} y1={-heightPx / 2} x2={widthPx / 2} y2={heightPx / 2} stroke={doorColor} strokeWidth={3} />
+
+                            {/* Door Leaf (the actual door panel) - thick line */}
+                            <line
+                                x1={-widthPx / 2}
+                                y1={heightPx / 2}
+                                x2={-widthPx / 2 + widthPx * 0.95}
+                                y2={heightPx / 2}
+                                stroke={doorColor}
+                                strokeWidth={4}
+                            />
+
+                            {/* Door Swing Arc (90 degree arc) */}
+                            <path
+                                d={`M ${-widthPx / 2 + widthPx * 0.95} ${heightPx / 2} 
+                                    A ${widthPx * 0.95} ${widthPx * 0.95} 0 0 0 ${-widthPx / 2} ${heightPx / 2 + widthPx * 0.95}`}
+                                fill="none"
+                                stroke={doorColor}
+                                strokeWidth={1.5}
+                                strokeDasharray="6 4"
+                                opacity={0.7}
+                            />
+
+                            {/* Door Direction Triangle */}
+                            <polygon
+                                points={`${-widthPx / 2 + 8},${heightPx / 2 + 6} ${-widthPx / 2 + 16},${heightPx / 2 + 12} ${-widthPx / 2 + 8},${heightPx / 2 + 18}`}
+                                fill={doorColor}
+                                opacity={0.6}
+                            />
+
+                            {/* Door Handle indicator */}
+                            <circle cx={-widthPx / 2 + widthPx * 0.85} cy={heightPx / 2} r={2.5} fill={doorColor} />
+                        </>
+                    ) : (
+                        /* ===== REALISTIC WINDOW ===== */
+                        <>
+                            {/* Window Frame */}
+                            <rect
+                                x={-widthPx / 2}
+                                y={-heightPx / 2}
+                                width={widthPx}
+                                height={heightPx}
+                                fill="none"
+                                stroke={windowColor}
+                                strokeWidth={2}
+                            />
+
+                            {/* Window Cross (mullions) */}
+                            <line x1={0} y1={-heightPx / 2} x2={0} y2={heightPx / 2} stroke={windowColor} strokeWidth={1.5} />
+                            <line x1={-widthPx / 2} y1={0} x2={widthPx / 2} y2={0} stroke={windowColor} strokeWidth={1.5} />
+
+                            {/* Window Glass indication - subtle fill */}
+                            <rect
+                                x={-widthPx / 2 + 2}
+                                y={-heightPx / 2 + 2}
+                                width={widthPx / 2 - 3}
+                                height={heightPx - 4}
+                                fill="#3b82f6"
+                                opacity={0.15}
+                            />
+                            <rect
+                                x={1}
+                                y={-heightPx / 2 + 2}
+                                width={widthPx / 2 - 3}
+                                height={heightPx - 4}
+                                fill="#3b82f6"
+                                opacity={0.15}
+                            />
+                        </>
                     )}
                 </g>
 
                 {/* Permanent Opening Dimension */}
                 {showDimensions && (
                     <g transform={`rotate(${textRot})`}>
-                        <rect x={-(labelWidth / 2) - 2} y={-heightPx / 2 + 2} width={labelWidth + 4} height={fontSize + 2} fill="rgba(15,23,42,0.8)" rx={2} />
+                        <rect x={-(labelWidth / 2) - 2} y={-heightPx / 2 - fontSize - 6} width={labelWidth + 4} height={fontSize + 2} fill="rgba(15,23,42,0.8)" rx={2} />
                         <text
                             x={0}
-                            y={-heightPx / 2 + 2 + fontSize}
+                            y={-heightPx / 2 - 4}
                             textAnchor="middle"
                             fill="#e2e8f0"
                             fontSize={fontSize}
@@ -1661,10 +1740,15 @@ const Canvas: React.FC<CanvasProps> = ({
 
     const renderDimensions = (wall: Wall) => {
         if (!showDimensions) return null;
-        const baseOffset = settings.dimensionOffset || 50;
+        // Use Wall-specific offset if available, else Global Setting, else Default
+        const baseOffset = (wall.dimensionOffset !== undefined) ? wall.dimensionOffset : (settings.dimensionOffset || 50);
+
+        // Use Wall-specific font size if available, else Global Setting, else Default (undefined -> handled in renderArchitecturalDimension)
+        const fontSize = (wall.dimensionFontSize !== undefined) ? wall.dimensionFontSize : settings.dimensionFontSize;
+
         // Stack the main dimension further out if we assume openings might take the inner space
         // We add a bit of padding (e.g., 40px) to stack it outside the "split" dimensions
-        return renderArchitecturalDimension(wall.start, wall.end, undefined, baseOffset + 40);
+        return renderArchitecturalDimension(wall.start, wall.end, undefined, baseOffset + 40, "#94a3b8", false, fontSize);
     }
 
     const renderLabels = () => {
@@ -1878,6 +1962,20 @@ const Canvas: React.FC<CanvasProps> = ({
                 <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.scale})`}>
                     <rect x={-50000} y={-50000} width={100000} height={100000} fill="url(#grid)" opacity={0.3} />
 
+                    {/* Sketch Overlay */}
+                    {sketchOverlay && (
+                        <image
+                            href={sketchOverlay.image}
+                            x={0}
+                            y={0}
+                            width={sketchOverlay.width}
+                            height={sketchOverlay.height}
+                            opacity={0.5}
+                            preserveAspectRatio="none"
+                            className="pointer-events-none"
+                        />
+                    )}
+
                     {/* Layer 0: Slabs (Bottom) */}
                     {slabs.map(slab => {
                         const isSelected = slab.id === selectedId;
@@ -2083,27 +2181,9 @@ const Canvas: React.FC<CanvasProps> = ({
                             const isSelected = selectedId === col.id;
                             const typeLabel = getType(col);
 
-                            // Safety Status Visualization
-                            const safety = results?.safetyReport?.columns[col.id];
-                            const status = (settings.showSafetyWarnings !== false) ? (safety?.status || 'safe') : 'safe';
-
-                            let strokeColor = '#3b82f6'; // Default Blue
-                            let fillColor = 'rgba(59, 130, 246, 0.2)';
-                            let pulse = false;
-
-                            if (status === 'critical') {
-                                strokeColor = '#ef4444'; // Red
-                                fillColor = 'rgba(239, 68, 68, 0.3)';
-                                pulse = true;
-                            } else if (status === 'warning') {
-                                strokeColor = '#f59e0b'; // Orange
-                                fillColor = 'rgba(245, 158, 11, 0.3)';
-                            }
-
-                            if (isSelected) {
-                                strokeColor = '#2563eb';
-                                fillColor = 'rgba(37, 99, 235, 0.4)';
-                            }
+                            // Simple column styling - no safety warnings
+                            const strokeColor = isSelected ? '#2563eb' : '#3b82f6'; // Blue
+                            const fillColor = isSelected ? 'rgba(37, 99, 235, 0.4)' : 'rgba(59, 130, 246, 0.2)';
 
                             return (
                                 <g
@@ -2112,24 +2192,6 @@ const Canvas: React.FC<CanvasProps> = ({
                                     onMouseDown={(e) => handleMouseDown(e, 'column', col.id)}
                                     className="cursor-move"
                                 >
-                                    {/* Pulse Effect for Critical Columns */}
-                                    {pulse && (
-                                        <rect
-                                            x={-(col.width * SCALE) / 2 - 10}
-                                            y={-(col.height * SCALE) / 2 - 10}
-                                            width={col.width * SCALE + 20}
-                                            height={col.height * SCALE + 20}
-                                            fill="none"
-                                            stroke={strokeColor}
-                                            strokeWidth={2}
-                                            opacity={0.5}
-                                        >
-                                            <animate attributeName="opacity" values="0.5;0;0.5" dur="1.5s" repeatCount="indefinite" />
-                                            <animate attributeName="stroke-width" values="2;6;2" dur="1.5s" repeatCount="indefinite" />
-                                        </rect>
-                                    )}
-
-                                    {/* Pad Footing (Dashed) - Only visible when selected */}
                                     {/* Pad Footing (Dashed) - Only visible when selected */}
                                     {isSelected && (
                                         <rect
@@ -2138,14 +2200,13 @@ const Canvas: React.FC<CanvasProps> = ({
                                             width={(col.padWidth || settings.padWidth || 1000) * SCALE}
                                             height={(col.padLength || settings.padLength || 1000) * SCALE}
                                             fill="none"
-                                            stroke={status === 'critical' ? '#ef4444' : "#94a3b8"}
+                                            stroke="#94a3b8"
                                             strokeWidth={2}
                                             strokeDasharray="5,5"
                                             opacity={0.5}
                                         />
                                     )}
 
-                                    {/* Column Body */}
                                     {/* Column Body */}
                                     <rect
                                         x={-(col.width * SCALE) / 2}
@@ -2154,7 +2215,7 @@ const Canvas: React.FC<CanvasProps> = ({
                                         height={col.height * SCALE}
                                         fill={fillColor}
                                         stroke={strokeColor}
-                                        strokeWidth={isSelected || status === 'critical' ? 3 : 2}
+                                        strokeWidth={isSelected ? 3 : 2}
                                     />
 
                                     {/* Column Label */}
@@ -2163,7 +2224,7 @@ const Canvas: React.FC<CanvasProps> = ({
                                         y={0}
                                         textAnchor="middle"
                                         dominantBaseline="middle"
-                                        fill={status === 'critical' ? '#ef4444' : "white"}
+                                        fill="white"
                                         fontSize={14}
                                         fontWeight="bold"
                                         style={{ pointerEvents: 'none' }}
@@ -2171,20 +2232,6 @@ const Canvas: React.FC<CanvasProps> = ({
                                     >
                                         {typeLabel}
                                     </text>
-
-                                    {/* Warning Icon for Critical/Warning */}
-                                    {status !== 'safe' && (
-                                        <text
-                                            x={col.width / 2 + 5}
-                                            y={-col.height / 2 - 5}
-                                            fill={status === 'critical' ? '#ef4444' : '#f59e0b'}
-                                            fontSize={20}
-                                            fontWeight="bold"
-                                            transform={`rotate(${- (col.rotation || 0)})`}
-                                        >
-                                            ⚠️
-                                        </text>
-                                    )}
                                 </g>
                             );
                         });
@@ -2369,17 +2416,55 @@ const Canvas: React.FC<CanvasProps> = ({
 
                     {isDrawing && points.length > 0 && (
                         <>
-                            {tool === 'wall' && (
-                                <>
-                                    <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#22c55e" strokeWidth={settings.blockThickness ? settings.blockThickness * SCALE : 225 * SCALE} opacity={0.7} />
-                                    <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#22c55e" strokeWidth={2} strokeDasharray="5,5" />
-                                </>
-                            )}
+                            {tool === 'wall' && (() => {
+                                // Calculate real-time dimensions
+                                const dx = cursor.x - points[0].x;
+                                const dy = cursor.y - points[0].y;
+                                const lengthPx = Math.sqrt(dx * dx + dy * dy);
+                                const lengthMM = Math.round(lengthPx / SCALE);
+                                const lengthM = (lengthMM / 1000).toFixed(2);
+                                const lengthFt = (lengthMM / 304.8).toFixed(2);
+                                const angleDeg = Math.round(Math.atan2(-dy, dx) * 180 / Math.PI);
+                                const normalizedAngle = angleDeg < 0 ? angleDeg + 360 : angleDeg;
+                                const midX = (points[0].x + cursor.x) / 2;
+                                const midY = (points[0].y + cursor.y) / 2;
+                                const thickness = toolSettings.wallType === 'partition' ? 150 : 225;
+
+                                // Snap feedback colors - green is default, special colors only when snapped
+                                const snapColor = snapType === 'endpoint' ? '#22c55e' :
+                                    snapType === 'midpoint' ? '#f59e0b' :
+                                        snapType === 'intersection' ? '#3b82f6' :
+                                            snapType === 'edge' ? '#8b5cf6' : '#22c55e'; // Default green
+                                const snapLabel = snapType === 'endpoint' ? '✓ ENDPOINT' :
+                                    snapType === 'midpoint' ? '◆ MIDPOINT' :
+                                        snapType === 'intersection' ? '✕ INTERSECTION' :
+                                            snapType === 'edge' ? '— ON EDGE' : '';
+                                const isSnapped = snapType !== 'none' && snapType !== 'grid';
+
+                                return (
+                                    <>
+                                        <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke={snapColor} strokeWidth={thickness * SCALE} opacity={0.7} />
+                                        <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke={snapColor} strokeWidth={2} strokeDasharray="5,5" />
+
+                                        {/* Compact dimension badge - positioned far from drawing */}
+                                        <g transform={`translate(${cursor.x + 25}, ${cursor.y - 35})`} opacity={0.9} pointerEvents="none">
+                                            <rect x={0} y={0} width={75} height={45} rx={6} fill="rgba(15, 23, 42, 0.85)" stroke={snapColor} strokeWidth={1.5} />
+                                            {snapLabel && <text x={37} y={12} textAnchor="middle" fill={snapColor} fontSize={8} fontWeight="bold">{snapLabel}</text>}
+                                            <text x={37} y={snapLabel ? 28 : 20} textAnchor="middle" fill="#22c55e" fontSize={14} fontWeight="bold" fontFamily="monospace">{lengthM}m</text>
+                                            <text x={37} y={snapLabel ? 40 : 35} textAnchor="middle" fill="#94a3b8" fontSize={8}>∠{normalizedAngle}° {toolSettings.wallType === 'partition' ? '6"' : '9"'}</text>
+                                        </g>
+
+                                        {/* Start/end markers */}
+                                        <circle cx={points[0].x} cy={points[0].y} r={5} fill={snapColor} stroke="white" strokeWidth={1.5} />
+                                        <circle cx={cursor.x} cy={cursor.y} r={isSnapped ? 7 : 4} fill={snapColor} stroke="white" strokeWidth={1.5} />
+                                        {isSnapped && <circle cx={cursor.x} cy={cursor.y} r={12} fill="none" stroke={snapColor} strokeWidth={1.5} opacity={0.4} />}
+                                    </>
+                                );
+                            })()}
                             {tool === 'beam' && (
                                 <>
                                     <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#3b82f6" strokeWidth={300 * SCALE} opacity={0.6} />
                                     <line x1={points[0].x} y1={points[0].y} x2={cursor.x} y2={cursor.y} stroke="#3b82f6" strokeWidth={4} strokeDasharray="5,5" />
-                                    {/* Tooltip for Beam */}
                                     <g transform={`translate(${cursor.x + 20}, ${cursor.y - 20})`}>
                                         <rect x={0} y={-20} width={120} height={24} rx={4} fill="rgba(59, 130, 246, 0.9)" />
                                         <text x={60} y={-4} textAnchor="middle" fill="white" fontSize={12} fontWeight="bold">Click to Place</text>

@@ -5,12 +5,13 @@ import { distance, calculateFloorArea, buildGraph, calculatePolygonArea, detectA
 const SCALE = 0.05; // Must match Canvas scale for decoding length
 
 /**
- * THE PHYSICS ENGINE
+ * THE ESTIMATION ENGINE
  * 
- * This module contains the "Immutable Rules" of the Master Protocol.
- * It strictly calculates geometric and material physics.
- * It strictly calculates geometric and material physics.
- * It does NOT predict; it calculates based on input parameters.
+ * This module implements the GT-OCA (Graph-Theoretic Overlap Correction Algorithm)
+ * for deterministic construction material estimation.
+ * 
+ * It strictly calculates geometric and material quantities based on input parameters.
+ * It does NOT predict; it calculates.
  */
 
 // Helper to detect intersections (Corners)
@@ -207,17 +208,38 @@ export const calculateEstimates = (
 
     let totalWallLength = 0;
     let totalOpeningArea = 0;
+    let wallLength9Inch = 0; // 225mm thick walls
+    let wallLength6Inch = 0; // 150mm thick walls
 
     // 1. Geometry Parsing - Use processed walls with junctions split
     processedWalls.forEach(w => {
         const len = distance(w.start, w.end) / SCALE; // Length in mm (decoded from pixel space)
         totalWallLength += len;
+
+        // Separate by wall thickness
+        if (w.thickness <= 150) {
+            wallLength6Inch += len;
+        } else {
+            wallLength9Inch += len;
+        }
     });
 
     let totalOpeningWidth = 0;
+    let openingArea9Inch = 0; // Openings on 9-inch walls
+    let openingArea6Inch = 0; // Openings on 6-inch walls
+
     openings.forEach(o => {
-        totalOpeningArea += (o.width * o.height) / 1000000; // convert mm^2 to m^2
+        const openingAreaM2 = (o.width * o.height) / 1000000; // convert mm^2 to m^2
+        totalOpeningArea += openingAreaM2;
         totalOpeningWidth += o.width / 1000; // convert mm to m
+
+        // Find host wall to determine wall type
+        const hostWall = processedWalls.find(w => w.id === o.wallId) || walls.find(w => w.id === o.wallId);
+        if (hostWall && hostWall.thickness <= 150) {
+            openingArea6Inch += openingAreaM2;
+        } else {
+            openingArea9Inch += openingAreaM2;
+        }
     });
 
     // Convert length to meters for Area Calc
@@ -230,7 +252,7 @@ export const calculateEstimates = (
     let overlapLengthCorrection = 0;
     const wallHeight = settings.wallHeightDefault / 1000; // meters
 
-    console.log('🔧 GT-OCA Junction Overlap Correction:');
+    console.log('🔧 SGG-OCA Junction Overlap Correction:');
     console.log(`  Total junctions: ${nodes.length}`);
 
     nodes.forEach(node => {
@@ -315,7 +337,13 @@ export const calculateEstimates = (
 
     console.log(`  Column deduction: ${totalColumnArea.toFixed(2)}m²`);
 
-    const netArea = Math.max(0, totalWallArea - totalOpeningArea - totalColumnArea);
+    // Calculate lintel area deduction (lintel band takes up wall height)
+    // Lintel runs along the wall at lintelDepth height
+    const lintelDepthForDeduction = (settings.lintelDepth || 225) / 1000;
+    const lintelAreaDeduction = correctedWallLength * lintelDepthForDeduction;
+    console.log(`  Lintel deduction: ${lintelAreaDeduction.toFixed(2)}m² (${lintelDepthForDeduction * 1000}mm depth)`);
+
+    const netArea = Math.max(0, totalWallArea - totalOpeningArea - totalColumnArea - lintelAreaDeduction);
 
     // 2. Block Physics
     // Block count relies on the Face Area (Length x Height), thickness doesn't affect the count (just the volume/weight if we calculated that)
@@ -323,10 +351,28 @@ export const calculateEstimates = (
     const effectiveBlockHeight = settings.blockHeight + settings.mortarThickness;
     const blockFaceArea = (effectiveBlockLength * effectiveBlockHeight) / 1000000; // m^2
 
-    const rawBlocks = netArea / blockFaceArea;
+    // Calculate block counts separately for 9-inch and 6-inch walls
+    const wallHeightMeters = settings.wallHeightDefault / 1000; // meters
 
-    // Wastage is the "Probabilistic" parameter injected into the Physics Engine
-    const blockCount = rawBlocks * (1 + settings.wastagePercentage / 100);
+    // 9-inch (225mm) walls - external/load-bearing
+    const wallLength9InchMeters = wallLength9Inch / 1000;
+    const wallArea9Inch = wallLength9InchMeters * wallHeightMeters;
+    const lintelDeduction9Inch = wallLength9InchMeters * lintelDepthForDeduction;
+    // Openings and columns deducted based on host wall type
+    const netArea9Inch = Math.max(0, wallArea9Inch - lintelDeduction9Inch - openingArea9Inch - totalColumnArea);
+    const rawBlocks9Inch = netArea9Inch / blockFaceArea;
+    const blockCount9Inch = rawBlocks9Inch * (1 + settings.wastagePercentage / 100);
+
+    // 6-inch (150mm) walls - partition/internal
+    const wallLength6InchMeters = wallLength6Inch / 1000;
+    const wallArea6Inch = wallLength6InchMeters * wallHeightMeters;
+    const lintelDeduction6Inch = wallLength6InchMeters * lintelDepthForDeduction;
+    const netArea6Inch = Math.max(0, wallArea6Inch - lintelDeduction6Inch - openingArea6Inch);
+    const rawBlocks6Inch = netArea6Inch / blockFaceArea;
+    const blockCount6Inch = rawBlocks6Inch * (1 + settings.wastagePercentage / 100);
+
+    // Total block count (for backward compatibility)
+    const blockCount = blockCount9Inch + blockCount6Inch;
 
     // 3. DPC Physics (Damp Proof Course)
     // DPC Length = Total Wall Length
@@ -356,7 +402,7 @@ export const calculateEstimates = (
         lintelLength = totalOpeningWidth + (estimatedOpeningCount * 2 * (settings.lintelOverhang / 1000));
     }
 
-    const concreteVolume = lintelLength * (settings.blockThickness / 1000) * 0.225; // Assuming 225mm depth
+    const concreteVolume = lintelLength * ((settings.lintelWidth || settings.blockThickness) / 1000) * ((settings.lintelDepth || 225) / 1000);
 
     // Reinforcement
     const reinforcementMainLength = lintelLength * settings.mainBarCount;
@@ -364,7 +410,9 @@ export const calculateEstimates = (
     // Stirrups: Spaced at 200mm (0.2m)
     // Stirrup length = perimeter of rect (width - cover) x (height - cover)
     // Simplified: (width + height) * 2
-    const stirrupPerimeter = ((settings.blockThickness / 1000) + 0.225) * 2;
+    const lintelWidthM = (settings.lintelWidth || settings.blockThickness) / 1000;
+    const lintelDepthM = (settings.lintelDepth || 225) / 1000;
+    const stirrupPerimeter = (lintelWidthM + lintelDepthM) * 2;
     const stirrupCount = Math.ceil(lintelLength / 0.2);
     const reinforcementStirrupLength = stirrupCount * stirrupPerimeter;
 
@@ -380,6 +428,7 @@ export const calculateEstimates = (
     const unitVol = (bLenM + mThickM) * (bHeightM + mThickM) * bThickM;
     const mortarPerBlock = unitVol - blockVol;
 
+    const rawBlocks = rawBlocks9Inch + rawBlocks6Inch;
     const totalMortarVolume = mortarPerBlock * rawBlocks; // Use raw blocks for pure volume, wastage applies to materials
 
     // Mix Ratio 1:X (Cement:Sand)
@@ -533,6 +582,7 @@ export const calculateEstimates = (
         totalColumnArea,
         netArea,
         blockCount: Math.ceil(blockCount),
+        blockCount6Inch: Math.ceil(blockCount6Inch),
         paintArea,
 
         // Lintel

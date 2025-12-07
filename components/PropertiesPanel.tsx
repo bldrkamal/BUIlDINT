@@ -8,7 +8,7 @@ interface PropertiesPanelProps {
     wall?: Wall;
     column?: Column;
     settings: ProjectSettings;
-    onUpdateWall: (id: string, updates: { length: number, angle: number }) => void;
+    onUpdateWall: (id: string, updates: { length: number, angle: number, dimensionOffset?: number, dimensionFontSize?: number }) => void;
     onUpdateColumn: (id: string, updates: { width: number, height: number, rotation: number, padWidth: number, padLength: number }) => void;
     onDelete: (id: string) => void;
     onClose: () => void;
@@ -29,6 +29,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     // Local State for Wall
     const [wallLength, setWallLength] = useState(0);
     const [wallAngle, setWallAngle] = useState(0);
+    const [dimOffset, setDimOffset] = useState<number | undefined>(undefined);
+    const [dimFontSize, setDimFontSize] = useState<number | undefined>(undefined);
 
     // Local State for Column
     const [colWidth, setColWidth] = useState(0);
@@ -43,6 +45,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         if (wall) {
             setWallLength(Math.round(distance(wall.start, wall.end) / SCALE));
             setWallAngle(Math.round(getAngle(wall.start, wall.end)));
+            setDimOffset(wall.dimensionOffset);
+            setDimFontSize(wall.dimensionFontSize);
         }
         if (column) {
             setColWidth(column.width);
@@ -58,7 +62,12 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
     const handleSave = () => {
         if (wall) {
-            onUpdateWall(selectedId, { length: wallLength, angle: wallAngle });
+            onUpdateWall(selectedId, {
+                length: wallLength,
+                angle: wallAngle,
+                dimensionOffset: dimOffset,
+                dimensionFontSize: dimFontSize
+            });
         } else if (column) {
             onUpdateColumn(selectedId, {
                 width: colWidth,
@@ -108,6 +117,29 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                                 type="number"
                                 value={wallAngle}
                                 onChange={(e) => setWallAngle(parseInt(e.target.value) || 0)}
+                            />
+                        </div>
+                    </div>
+                    {/* Dimension Controls */}
+                    <div className="flex gap-2 pt-2 border-t border-slate-700">
+                        <div className="grow">
+                            <label className="text-[10px] text-slate-500 block mb-1">Dim Offset</label>
+                            <input
+                                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
+                                type="number"
+                                value={dimOffset}
+                                onChange={(e) => setDimOffset(parseInt(e.target.value) || 0)}
+                                placeholder="Default"
+                            />
+                        </div>
+                        <div className="grow">
+                            <label className="text-[10px] text-slate-500 block mb-1">Text Size</label>
+                            <input
+                                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
+                                type="number"
+                                value={dimFontSize}
+                                onChange={(e) => setDimFontSize(parseInt(e.target.value) || 0)}
+                                placeholder="Default"
                             />
                         </div>
                     </div>

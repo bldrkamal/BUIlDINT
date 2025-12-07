@@ -1,17 +1,32 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Wall, Opening, ProjectSettings, ToolMode, CalculationResult, ToolSettings, GroundTruth, ProjectMeta, ProjectData, ProjectLabel, Column, Beam, Slab } from './types';
-import { calculateEstimates } from './utils/physicsEngine';
+import { calculateEstimates } from './utils/estimationEngine';
 import { compileGraphData } from './utils/graphCompiler';
 import Toolbar from './components/Toolbar';
 import Sidebar from './components/Sidebar';
 import Canvas from './components/Canvas';
-import { Hammer, Info, Menu, MapPin } from 'lucide-react';
+import { SketchUploader } from './components/SketchUploader';
+import { GeminiFloorPlanResponse } from './types/gemini';
+import { Hammer, Info, Menu, MapPin, Sun, Moon } from 'lucide-react';
 
 const App: React.FC = () => {
   // --- State ---
   const [tool, setTool] = useState<ToolMode>('wall');
   const [snapEnabled, setSnapEnabled] = useState<boolean>(true);
   const [showDimensions, setShowDimensions] = useState<boolean>(true);
+  const [isSketchUploaderOpen, setIsSketchUploaderOpen] = useState(false);
+  const [sketchOverlay, setSketchOverlay] = useState<{ image: string, width: number, height: number } | null>(null);
+  const [showOverlay, setShowOverlay] = useState(true); // Toggle to show/hide sketch overlay
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    return saved ? saved === 'dark' : true; // Default to dark mode
+  });
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.classList.toggle('light-theme', !isDarkMode);
+    localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+  }, [isDarkMode]);
 
   // Canvas Data
   const [walls, setWalls] = useState<Wall[]>([]);
@@ -48,10 +63,10 @@ const App: React.FC = () => {
     blockLength: 450,
     blockHeight: 225,
     blockThickness: 225,
-    mortarThickness: 20,
+    mortarThickness: 25,
     floorThickness: 150,
     wallHeightDefault: 3000,
-    wastagePercentage: 5,
+    wastagePercentage: 0,
 
     dimensionOffset: 50,
     dimensionFontSize: 12,
@@ -59,6 +74,8 @@ const App: React.FC = () => {
 
     lintelType: 'chain',
     lintelOverhang: 150,
+    lintelWidth: 225, // mm - typically matches wall thickness
+    lintelDepth: 225, // mm - section depth/height
     mainBarDiameter: 12,
     mainBarCount: 4,
     stirrupBarDiameter: 8,
@@ -81,7 +98,9 @@ const App: React.FC = () => {
     windowWidth: 1200,
     windowHeight: 1200,
     columnWidth: 225,
-    columnHeight: 225
+    columnHeight: 225,
+    wallType: 'external',
+    displayUnit: 'mm'
   });
 
   // --- GPS Sensor ---
@@ -267,14 +286,171 @@ const App: React.FC = () => {
     setWalls(action);
   };
 
+  const handleSketchAnalysisComplete = (data: GeminiFloorPlanResponse, imageBase64: string | null) => {
+    console.log("Analysis Result:", data);
+    console.log("Detected Dimensions:", (data as any).dimensions);
+    setIsSketchUploaderOpen(false);
+
+    if (!data.walls || data.walls.length === 0) {
+      alert("No walls detected in the file.");
+      return;
+    }
+
+    // Conversion Logic
+    // 1. Determine Scale
+    // If we have a scale reference, calculate pixels per meter from it
+    let pixelsPerMeter = data.estimatedScale || 100;
+
+    if (data.scaleReference && data.scaleReference.realWorldLength > 0) {
+      const refDx = data.scaleReference.end.x - data.scaleReference.start.x;
+      const refDy = data.scaleReference.end.y - data.scaleReference.start.y;
+      const refPixelLength = Math.sqrt(refDx * refDx + refDy * refDy);
+
+      // Convert realWorldLength to mm
+      let realLengthMM = data.scaleReference.realWorldLength;
+      if (data.scaleReference.unit === 'm') {
+        realLengthMM = data.scaleReference.realWorldLength * 1000;
+      } else if (data.scaleReference.unit === 'ft') {
+        realLengthMM = data.scaleReference.realWorldLength * 304.8;
+      }
+
+      // pixelsPerMeter = how many pixels represent 1000mm (1 meter)
+      pixelsPerMeter = (refPixelLength / realLengthMM) * 1000;
+      console.log(`Scale calculated from reference: ${pixelsPerMeter} px/m`);
+    }
+
+    const SCALE = 0.05; // 1mm = 0.05px (Must match Canvas.tsx)
+
+    // Helper to convert normalized coord to mm
+    const toMM = (val: number) => (val / pixelsPerMeter) * 1000;
+
+    // 2. Create Wall Objects
+    const newWalls: Wall[] = data.walls.map((w, index) => {
+      // Calculate wall length in normalized coordinates
+      const dx = w.end.x - w.start.x;
+      const dy = w.end.y - w.start.y;
+      const normalizedLength = Math.sqrt(dx * dx + dy * dy);
+
+      // If Gemini provided lengthMM, use it to calculate accurate positions
+      let startX, startY, endX, endY;
+
+      if (w.lengthMM && w.lengthMM > 0) {
+        // We have a real dimension - use it!
+        // Keep normalized direction, but scale to actual length
+        const actualLengthPx = w.lengthMM * SCALE;
+        const scaleFactor = actualLengthPx / (normalizedLength > 0 ? normalizedLength : 1);
+
+        // Use start position from normalized coords, calculate end from real length
+        startX = toMM(w.start.x) * SCALE;
+        startY = toMM(w.start.y) * SCALE;
+
+        // Direction vector
+        const dirX = normalizedLength > 0 ? dx / normalizedLength : 1;
+        const dirY = normalizedLength > 0 ? dy / normalizedLength : 0;
+
+        endX = startX + dirX * actualLengthPx;
+        endY = startY + dirY * actualLengthPx;
+
+        console.log(`Wall ${index}: Using lengthMM=${w.lengthMM}mm, actualPx=${actualLengthPx}`);
+      } else {
+        // Fallback to coordinate-based calculation
+        startX = toMM(w.start.x) * SCALE;
+        startY = toMM(w.start.y) * SCALE;
+        endX = toMM(w.end.x) * SCALE;
+        endY = toMM(w.end.y) * SCALE;
+      }
+
+      return {
+        id: crypto.randomUUID ? crypto.randomUUID() : `wall-${Date.now()}-${index}`,
+        start: { x: startX, y: startY },
+        end: { x: endX, y: endY },
+        thickness: w.thickness || settings.blockThickness,
+        height: settings.wallHeightDefault,
+        type: w.type === 'partition' ? 'partition' : 'wall'
+      };
+    });
+
+    // 3. Create Openings from detected doors and windows
+    const newOpenings: Opening[] = [];
+    if (data.openings && data.openings.length > 0) {
+      data.openings.forEach((o, index) => {
+        // Find the wall this opening belongs to
+        const wallIndex = o.wallIndex !== undefined ? o.wallIndex : 0;
+        const wall = newWalls[wallIndex];
+
+        if (wall) {
+          // Calculate position on the wall (as a ratio 0-1)
+          const wallDx = wall.end.x - wall.start.x;
+          const wallDy = wall.end.y - wall.start.y;
+          const wallLength = Math.sqrt(wallDx * wallDx + wallDy * wallDy);
+
+          // Convert opening position to wall-relative position
+          const openingX = toMM(o.position.x) * SCALE;
+          const openingY = toMM(o.position.y) * SCALE;
+
+          // Calculate distance from wall start to opening position
+          const dx = openingX - wall.start.x;
+          const dy = openingY - wall.start.y;
+          const distFromStart = Math.sqrt(dx * dx + dy * dy);
+
+          // Ensure it's within the wall
+          const clampedDist = Math.min(wallLength - 10, Math.max(10, distFromStart));
+
+          newOpenings.push({
+            id: crypto.randomUUID ? crypto.randomUUID() : `opening-${Date.now()}-${index}`,
+            wallId: wall.id,
+            type: o.type,
+            distanceFromStart: clampedDist,
+            width: o.widthMM || (o.type === 'door' ? 900 : 1200),
+            height: o.heightMM || (o.type === 'door' ? 2100 : 1200)
+          });
+        }
+      });
+      console.log(`Created ${newOpenings.length} openings from detected doors/windows`);
+    }
+
+    // Calculate Image Overlay Dimensions in Pixels (only if image provided)
+    if (imageBase64) {
+      const overlayWidth = toMM(1000) * SCALE;
+      const overlayHeight = toMM(1000) * SCALE;
+
+      setSketchOverlay({
+        image: imageBase64,
+        width: overlayWidth,
+        height: overlayHeight
+      });
+    } else {
+      // DXF import - no overlay image
+      setSketchOverlay(null);
+    }
+
+    // 4. Update State
+    if (walls.length > 0) {
+      if (confirm("Replace existing drawing? Cancel to append.")) {
+        setWallsWithHistory(newWalls);
+        setOpenings(newOpenings);
+      } else {
+        setWallsWithHistory([...walls, ...newWalls]);
+        setOpenings([...openings, ...newOpenings]);
+      }
+    } else {
+      setWallsWithHistory(newWalls);
+      setOpenings(newOpenings);
+    }
+
+    const source = imageBase64 ? 'sketch' : 'DXF file';
+    const openingInfo = newOpenings.length > 0 ? ` and ${newOpenings.length} openings` : '';
+    alert(`Successfully imported ${newWalls.length} walls${openingInfo} from ${source}!`);
+  };
+
   const results = useMemo<CalculationResult>(() => {
     return calculateEstimates(walls, openings, columns, beams, slabs, settings);
   }, [walls, openings, columns, beams, slabs, settings]);
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-slate-900 text-white overflow-hidden font-sans">
+    <div className="flex flex-col h-[100dvh] overflow-hidden font-sans" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
       {/* Header */}
-      <header className="h-14 bg-slate-900 border-b border-slate-800 flex items-center px-4 md:px-6 justify-between z-30 shrink-0">
+      <header className="h-14 flex items-center px-4 md:px-6 justify-between z-30 shrink-0" style={{ background: 'var(--bg-primary)', borderBottom: '1px solid var(--border-primary)' }}>
         <div className="flex items-center gap-3">
           <div className="bg-brand-600 p-1.5 md:p-2 rounded-lg">
             <Hammer size={18} className="text-white md:w-5 md:h-5" />
@@ -293,13 +469,24 @@ const App: React.FC = () => {
               <span>GPS Active</span>
             </div>
           )}
-          <div className="hidden md:flex items-center gap-2 text-slate-400 text-xs md:text-sm bg-slate-800 px-3 py-1 rounded-full">
+          <div className="hidden md:flex items-center gap-2 text-xs md:text-sm px-3 py-1 rounded-full" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
             <Info size={14} />
             <span>Type numbers to set length</span>
           </div>
 
+          {/* Theme Toggle */}
           <button
-            className="md:hidden p-2 text-slate-300 hover:bg-slate-800 rounded-md"
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className="p-2 rounded-md transition-colors hover:bg-opacity-80"
+            style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
+            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+
+          <button
+            className="md:hidden p-2 rounded-md"
+            style={{ color: 'var(--text-secondary)' }}
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           >
             <Menu size={20} />
@@ -321,6 +508,12 @@ const App: React.FC = () => {
           onSave={handleSave}
           onLoad={handleLoad}
           onExportTrainingData={handleExportTrainingData}
+          onOpenSketchUpload={() => setIsSketchUploaderOpen(true)}
+          toolSettings={toolSettings}
+          setToolSettings={setToolSettings}
+          showOverlay={showOverlay}
+          setShowOverlay={setShowOverlay}
+          hasOverlay={!!sketchOverlay}
         />
 
         <div className="flex-1 relative bg-canvas-bg overflow-hidden touch-none">
@@ -347,6 +540,7 @@ const App: React.FC = () => {
             setSelectedId={setSelectedId}
             onUpdateSettings={setSettings}
             results={results}
+            sketchOverlay={showOverlay ? sketchOverlay : null}
           />
         </div>
 
@@ -371,6 +565,13 @@ const App: React.FC = () => {
           walls={walls}
           openings={openings}
         />
+
+        {isSketchUploaderOpen && (
+          <SketchUploader
+            onAnalysisComplete={handleSketchAnalysisComplete}
+            onClose={() => setIsSketchUploaderOpen(false)}
+          />
+        )}
       </main>
     </div>
   );

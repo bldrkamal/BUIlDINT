@@ -1,5 +1,5 @@
 
-import { calculateEstimates } from './utils/physicsEngine';
+import { calculateEstimates } from './utils/estimationEngine';
 import { Wall, ProjectSettings } from './types';
 
 // Mock settings to match the paper's constants

@@ -12,6 +12,8 @@ export interface Wall {
   end: Point;
   thickness: number; // in mm
   height: number; // in mm
+  dimensionOffset?: number; // Distance from wall in px
+  dimensionFontSize?: number; // Font size in px
 }
 
 export type OpeningType = 'door' | 'window' | 'arch';
@@ -81,6 +83,8 @@ export interface ProjectSettings {
   // Lintel Settings
   lintelType: 'chain' | 'opening';
   lintelOverhang: number; // mm
+  lintelWidth: number; // mm (section width, typically same as wall thickness)
+  lintelDepth: number; // mm (section depth/height)
   mainBarDiameter: number; // mm
   mainBarCount: number;
   stirrupBarDiameter: number; // mm
@@ -108,6 +112,9 @@ export interface ProjectSettings {
   showTributaryAreas?: boolean; // Toggle for tributary area visualization
 }
 
+export type WallType = 'external' | 'partition';
+export type DisplayUnit = 'mm' | 'm' | 'ft' | 'in';
+
 export interface ToolSettings {
   doorWidth: number;
   doorHeight: number;
@@ -115,6 +122,8 @@ export interface ToolSettings {
   windowHeight: number;
   columnWidth: number; // mm
   columnHeight: number; // mm
+  wallType: WallType; // 'external' = 225mm, 'partition' = 150mm
+  displayUnit: DisplayUnit; // Unit for display and input (default: mm)
 }
 
 export type ToolMode = 'select' | 'wall' | 'door' | 'window' | 'column' | 'beam' | 'slab' | 'eraser' | 'pan' | 'text' | 'section';
@@ -124,7 +133,8 @@ export interface CalculationResult {
   totalOpeningArea: number; // sq meters
   totalColumnArea: number; // sq meters (column footprints)
   netArea: number; // sq meters
-  blockCount: number;
+  blockCount: number; // 9-inch blocks
+  blockCount6Inch: number; // 6-inch blocks
   estimatedDuration?: number; // days
   complexityScore?: number; // multiplier (1.0 = base)
   paintArea: number; // sq meters (both sides)

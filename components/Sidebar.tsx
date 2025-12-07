@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { ChevronRight, ChevronLeft, Eye, X, CheckCircle2, AlertTriangle, ChevronDown } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Eye, X, CheckCircle2, AlertTriangle, ChevronDown, Settings } from 'lucide-react';
 import { ProjectSettings, CalculationResult, ToolMode, ToolSettings, GroundTruth, ProjectLabel, ProjectMeta, Column, Wall, Opening } from '../types';
 import PriceComparison from './PriceComparison';
 
@@ -28,6 +28,9 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({
   settings,
+  onUpdateSettings,
+  toolSettings,
+  onUpdateToolSettings,
   results,
   showDimensions,
   setShowDimensions,
@@ -58,12 +61,12 @@ const Sidebar: React.FC<SidebarProps> = ({
         />
       )}
 
-      <div className={`absolute right-0 top-0 h-full bg-slate-900 border-l border-slate-800 shadow-2xl transition-transform duration-300 flex flex-col z-40 ${isOpen ? 'translate-x-0' : 'translate-x-full'} w-[85vw] md:w-96`}>
+      <div className={`slide-in-right glass absolute right-0 top-0 h-full border-l border-slate-800 shadow-2xl transition-transform duration-300 flex flex-col z-40 ${isOpen ? 'translate-x-0' : 'translate-x-full'} w-[85vw] md:w-96`}>
 
         {/* Desktop Toggle Button */}
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="hidden md:flex absolute -left-8 top-1/2 transform -translate-y-1/2 bg-slate-800 p-1 rounded-l-md border-y border-l border-slate-700 text-slate-400 hover:text-brand-500"
+          className="hidden md:flex absolute -left-8 top-1/2 transform -translate-y-1/2 bg-slate-800 p-1 rounded-l-md border-y border-l border-slate-700 text-slate-400 hover:text-brand-500 active:scale-95 transition-transform"
         >
           {isOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
         </button>
@@ -78,37 +81,44 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <button
             onClick={() => setIsOpen(false)}
-            className="md:hidden text-slate-400 p-1"
+            className="md:hidden text-slate-400 p-1 active:scale-90 transition-transform"
           >
             <X size={24} />
           </button>
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-hide">
 
-          {/* Main Metric - BLOCKS (Big and Prominent) */}
-          <div className="bg-brand-900/30 rounded-xl p-5 border border-brand-500/30 text-center">
-            <div className="text-xs text-brand-400 uppercase mb-2 font-semibold">Required Blocks</div>
-            <div className="text-5xl font-bold text-brand-500 font-mono mb-1">{Math.ceil(results.blockCount)}</div>
-            <div className="text-xs text-slate-500">Includes {settings.wastagePercentage}% wastage</div>
+          {/* Main Metric - 9" BLOCKS (External/Load-bearing) */}
+          <div className="metric-card bg-brand-900/30 rounded-xl p-5 border border-brand-500/30 text-center gradient-border">
+            <div className="text-xs text-brand-400 uppercase mb-2 font-semibold tracking-wider">9" Blocks (External)</div>
+            <div className="block-count text-5xl font-bold font-mono mb-1 count-up">{Math.ceil(results.blockCount - results.blockCount6Inch)}</div>
+            <div className="text-xs text-slate-500">225mm load-bearing walls</div>
+          </div>
+
+          {/* 6-inch Blocks (Partition/Internal) */}
+          <div className="metric-card bg-purple-900/30 rounded-xl p-4 border border-purple-500/30 text-center">
+            <div className="text-xs text-purple-400 uppercase mb-2 font-semibold tracking-wider">6" Blocks (Partition)</div>
+            <div className="text-4xl font-bold font-mono text-purple-300 count-up">{Math.ceil(results.blockCount6Inch)}</div>
+            <div className="text-xs text-slate-500">150mm internal walls</div>
           </div>
 
           {/* Other Key Materials */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-slate-800 rounded-lg p-3 text-center">
+            <div className="metric-card bg-slate-800/80 rounded-lg p-3 text-center backdrop-blur-sm">
               <div className="text-[10px] text-slate-400 uppercase mb-1">Cement</div>
-              <div className="text-2xl font-bold text-white font-mono">{Math.ceil(results.cementBags)}</div>
+              <div className="text-2xl font-bold text-white font-mono count-up">{Math.ceil(results.cementBags)}</div>
               <div className="text-[10px] text-slate-500">Bags</div>
             </div>
-            <div className="bg-slate-800 rounded-lg p-3 text-center">
+            <div className="metric-card bg-slate-800/80 rounded-lg p-3 text-center backdrop-blur-sm">
               <div className="text-[10px] text-slate-400 uppercase mb-1">Sand</div>
-              <div className="text-2xl font-bold text-white font-mono">{results.sandTons.toFixed(1)}</div>
+              <div className="text-2xl font-bold text-white font-mono count-up">{results.sandTons.toFixed(1)}</div>
               <div className="text-[10px] text-slate-500">Tons</div>
             </div>
-            <div className="bg-slate-800 rounded-lg p-3 text-center">
+            <div className="metric-card bg-slate-800/80 rounded-lg p-3 text-center backdrop-blur-sm">
               <div className="text-[10px] text-slate-400 uppercase mb-1">Paint Area</div>
-              <div className="text-2xl font-bold text-white font-mono">{results.paintArea.toFixed(0)}</div>
+              <div className="text-2xl font-bold text-white font-mono count-up">{results.paintArea.toFixed(0)}</div>
               <div className="text-[10px] text-slate-500">m²</div>
             </div>
           </div>
@@ -227,6 +237,150 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
+          {/* Building Settings */}
+          <details className="group">
+            <summary className="cursor-pointer bg-slate-800/50 rounded-lg p-3 text-sm text-slate-300 hover:bg-slate-800 transition-colors list-none flex items-center justify-between">
+              <span className="font-medium flex items-center gap-2">
+                <Settings size={16} className="text-blue-400" />
+                Building Settings
+              </span>
+              <ChevronDown size={16} className="group-open:rotate-180 transition-transform" />
+            </summary>
+            <div className="mt-3 space-y-4 bg-slate-900/50 rounded-lg p-4">
+
+              {/* Wall/Building Height */}
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Wall Height (mm)</label>
+                <input
+                  type="number"
+                  value={settings.wallHeightDefault}
+                  onChange={(e) => onUpdateSettings({ ...settings, wallHeightDefault: parseInt(e.target.value) || 3000 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Mortar Thickness */}
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Mortar Thickness (mm)</label>
+                <input
+                  type="number"
+                  value={settings.mortarThickness}
+                  onChange={(e) => onUpdateSettings({ ...settings, mortarThickness: parseInt(e.target.value) || 25 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Door Dimensions */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Door Width (mm)</label>
+                  <input
+                    type="number"
+                    value={toolSettings.doorWidth}
+                    onChange={(e) => onUpdateToolSettings({ ...toolSettings, doorWidth: parseInt(e.target.value) || 900 })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Door Height (mm)</label>
+                  <input
+                    type="number"
+                    value={toolSettings.doorHeight}
+                    onChange={(e) => onUpdateToolSettings({ ...toolSettings, doorHeight: parseInt(e.target.value) || 2100 })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Window Dimensions */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Window Width (mm)</label>
+                  <input
+                    type="number"
+                    value={toolSettings.windowWidth}
+                    onChange={(e) => onUpdateToolSettings({ ...toolSettings, windowWidth: parseInt(e.target.value) || 1200 })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Window Height (mm)</label>
+                  <input
+                    type="number"
+                    value={toolSettings.windowHeight}
+                    onChange={(e) => onUpdateToolSettings({ ...toolSettings, windowHeight: parseInt(e.target.value) || 1200 })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Lintel Settings */}
+              <div className="border-t border-slate-700 pt-4 mt-4">
+                <h4 className="text-xs text-slate-400 mb-2 uppercase tracking-wider">Lintel Settings</h4>
+
+                <div className="mb-3">
+                  <label className="block text-xs text-slate-400 mb-1">Lintel Type</label>
+                  <select
+                    value={settings.lintelType}
+                    onChange={(e) => onUpdateSettings({ ...settings, lintelType: e.target.value as 'chain' | 'opening' })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                  >
+                    <option value="chain">Chain (Continuous)</option>
+                    <option value="opening">Opening Only</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Lintel Width (mm)</label>
+                    <input
+                      type="number"
+                      value={settings.lintelWidth}
+                      onChange={(e) => onUpdateSettings({ ...settings, lintelWidth: parseInt(e.target.value) || 225 })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Lintel Depth (mm)</label>
+                    <input
+                      type="number"
+                      value={settings.lintelDepth}
+                      onChange={(e) => onUpdateSettings({ ...settings, lintelDepth: parseInt(e.target.value) || 225 })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Column Settings */}
+              <div className="border-t border-slate-700 pt-4 mt-4">
+                <h4 className="text-xs text-slate-400 mb-2 uppercase tracking-wider">Column Settings</h4>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Column Width (mm)</label>
+                    <input
+                      type="number"
+                      value={toolSettings.columnWidth}
+                      onChange={(e) => onUpdateToolSettings({ ...toolSettings, columnWidth: parseInt(e.target.value) || 225 })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Column Height (mm)</label>
+                    <input
+                      type="number"
+                      value={toolSettings.columnHeight}
+                      onChange={(e) => onUpdateToolSettings({ ...toolSettings, columnHeight: parseInt(e.target.value) || 225 })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </details>
+
         </div>
       </div>
     </>
@@ -234,3 +388,4 @@ const Sidebar: React.FC<SidebarProps> = ({
 };
 
 export default Sidebar;
+
