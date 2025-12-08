@@ -103,8 +103,9 @@ const Toolbar: React.FC<ToolbarProps> = ({
       className={`tool-btn p-3 min-w-[48px] min-h-[48px] rounded-full md:rounded-lg transition-all duration-200 group relative flex items-center justify-center active:scale-95
         ${activeTool === tool.id
           ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50 tool-active'
-          : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+          : ''
         } `}
+      style={{ color: activeTool === tool.id ? undefined : 'var(--text-secondary)', backgroundColor: activeTool === tool.id ? undefined : 'transparent' }}
       title={tool.label}
     >
       {tool.icon}
@@ -115,7 +116,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   );
 
   return (
-    <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 flex-row md:translate-x-0 md:static md:absolute md:left-4 md:top-20 md:flex-col gap-2 bg-slate-800/90 backdrop-blur-xl p-2 rounded-2xl md:rounded-xl shadow-2xl border border-slate-700/50 z-40 flex items-center overflow-x-auto max-w-[90vw] scrollbar-hide">
+    <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 flex-row md:translate-x-0 md:static md:absolute md:left-4 md:top-20 md:flex-col gap-2 backdrop-blur-xl p-2 rounded-2xl md:rounded-xl shadow-2xl z-40 flex items-center overflow-x-auto max-w-[90vw] scrollbar-hide" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)', border: '1px solid var(--border-primary)' }}>
 
       {/* Edit Group */}
       <div className="flex gap-1 md:flex-col md:gap-2">
@@ -124,14 +125,15 @@ const Toolbar: React.FC<ToolbarProps> = ({
         <button
           onClick={onUndo}
           disabled={!canUndo}
-          className={`p-3 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg transition-all duration-200 text-slate-400 hover:bg-slate-700 hover:text-white ${!canUndo ? 'opacity-30 cursor-not-allowed' : ''} `}
+          className={`p-3 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg transition-all duration-200 ${!canUndo ? 'opacity-30 cursor-not-allowed' : ''} `}
+          style={{ color: 'var(--text-secondary)' }}
           title="Undo"
         >
           <Undo2 size={20} className="md:w-6 md:h-6" />
         </button>
       </div>
 
-      <div className="w-px h-8 bg-slate-700 md:w-8 md:h-px md:my-1" />
+      <div className="w-px h-8 md:w-8 md:h-px md:my-1" style={{ background: 'var(--border-primary)' }} />
 
       {/* Structure Group */}
       <div className="flex gap-1 md:flex-col md:gap-2">
@@ -154,21 +156,21 @@ const Toolbar: React.FC<ToolbarProps> = ({
         )}
       </div>
 
-      <div className="w-px h-8 bg-slate-700 md:w-8 md:h-px md:my-1" />
+      <div className="w-px h-8 md:w-8 md:h-px md:my-1" style={{ background: 'var(--border-primary)' }} />
 
       {/* Openings Group */}
       <div className="flex gap-1 md:flex-col md:gap-2">
         {openingTools.map(renderToolButton)}
       </div>
 
-      <div className="w-px h-8 bg-slate-700 md:w-8 md:h-px md:my-1" />
+      <div className="w-px h-8 md:w-8 md:h-px md:my-1" style={{ background: 'var(--border-primary)' }} />
 
       {/* Annotation Group */}
       <div className="flex gap-1 md:flex-col md:gap-2">
         {annotationTools.map(renderToolButton)}
       </div>
 
-      <div className="w-px h-8 bg-slate-700 md:w-8 md:h-px md:my-1" />
+      <div className="w-px h-8 md:w-8 md:h-px md:my-1" style={{ background: 'var(--border-primary)' }} />
 
       {/* Utilities Group */}
       <div className="flex gap-1 md:flex-col md:gap-2">
@@ -177,8 +179,9 @@ const Toolbar: React.FC<ToolbarProps> = ({
           className={`p-3 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg transition-all duration-200 group relative flex items-center justify-center
               ${snapEnabled
               ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50'
-              : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+              : ''
             } `}
+          style={{ color: snapEnabled ? undefined : 'var(--text-secondary)' }}
           title="Toggle Snap"
         >
           <Magnet size={20} className="md:w-6 md:h-6" />
@@ -192,7 +195,8 @@ const Toolbar: React.FC<ToolbarProps> = ({
           <select
             value={toolSettings.displayUnit}
             onChange={(e) => setToolSettings({ ...toolSettings, displayUnit: e.target.value as 'mm' | 'm' | 'ft' | 'in' })}
-            className="p-2 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg bg-slate-700 text-white text-xs font-bold cursor-pointer border border-slate-600 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none text-center"
+            className="p-2 min-w-[44px] min-h-[44px] rounded-full md:rounded-lg text-xs font-bold cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none text-center"
+            style={{ background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}
             title="Display Unit"
           >
             <option value="mm">mm</option>

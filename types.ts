@@ -85,6 +85,7 @@ export interface ProjectSettings {
   lintelOverhang: number; // mm
   lintelWidth: number; // mm (section width, typically same as wall thickness)
   lintelDepth: number; // mm (section depth/height)
+  deductLintelFromBlocks: boolean; // If true, lintel volume is deducted from block count
   mainBarDiameter: number; // mm
   mainBarCount: number;
   stirrupBarDiameter: number; // mm

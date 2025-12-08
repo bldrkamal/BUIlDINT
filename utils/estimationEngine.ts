@@ -262,28 +262,55 @@ export const calculateEstimates = (
         colReinforcementStirrup += sCount * ((wM + dM) * 2);
     });
 
-    // Lintels: Volume = Footprint * Depth? 
-    // No, Lintel is a band. 
-    // Volume = WallLength * Thickness * Depth.
-    // We don't have linear "Wall Length" easily from CSG Union.
-    // Back-calculate Effective Length from Volume? Length = Volume / (Thickness * Height).
-    // Effective Length 9" = grossVol9 / (0.225 * wallHeightM).
-    const thick9 = (settings.blockThickness || 225) / 1000;
-    const effectiveLen9 = grossVol9 / (thick9 * wallHeightM);
-
-    // Partition 6" (150mm)
-    const thick6 = 0.150;
-    const effectiveLen6 = grossVol6 / (thick6 * wallHeightM);
-
+    // Lintels: Volume is calculated ONLY for openings (not full wall length)
+    // Lintel Volume = Sum of (OpeningWidth + 2×Overhang) × WallThickness × LintelDepth
+    // Only deduct lintel for the opening area, not the entire wall.
+    const lintelOverhangM = (settings.lintelOverhang || 150) / 1000;  // 150mm default overhang each side
     const lintelDepthM = (settings.lintelDepth || 225) / 1000;
-    const lintelVol9 = effectiveLen9 * thick9 * lintelDepthM;
-    const lintelVol6 = effectiveLen6 * thick6 * lintelDepthM;
+    const thick9 = (settings.blockThickness || 225) / 1000;
+    const thick6 = 0.150;
+
+    let lintelVol9 = 0;
+    let lintelVol6 = 0;
+
+    if (settings.lintelType === 'chain') {
+        const len9 = grossVol9 / (thick9 * wallHeightM);
+        const len6 = grossVol6 / (thick6 * wallHeightM);
+        lintelVol9 = len9 * thick9 * lintelDepthM;
+        lintelVol6 = len6 * thick6 * lintelDepthM;
+    } else {
+        openings.forEach(o => {
+            const hostWall = walls.find(w => w.id === o.wallId);
+            if (hostWall) {
+                const lintelSpanM = (o.width / 1000) + (2 * lintelOverhangM);
+                const wallThickM = hostWall.thickness / 1000;
+                const lintelVol = lintelSpanM * wallThickM * lintelDepthM;
+
+                if (hostWall.thickness > 150) {
+                    lintelVol9 += lintelVol;
+                } else {
+                    lintelVol6 += lintelVol;
+                }
+            }
+        });
+    }
 
     // --- Net Volumes ---
-    // Net = Gross - Openings - Columns - Lintels
+    // Net = Gross - Openings - Columns - Lintels (if deduction enabled)
     // Ensure not negative
-    const netVol9 = Math.max(0, grossVol9 - openingVol9 - columnVolDeduction - lintelVol9);
-    const netVol6 = Math.max(0, grossVol6 - openingVol6 - lintelVol6);
+    const deductLintel = settings.deductLintelFromBlocks ?? false;  // Default: no deduction
+    const netVol9 = Math.max(0, grossVol9 - openingVol9 - columnVolDeduction - (deductLintel ? lintelVol9 : 0));
+    const netVol6 = Math.max(0, grossVol6 - openingVol6 - (deductLintel ? lintelVol6 : 0));
+
+    // Calculate effective wall lengths for foundation/reinforcement calculations
+    const effectiveLen9 = grossVol9 / (thick9 * wallHeightM);
+    const effectiveLen6 = grossVol6 / (thick6 * wallHeightM);
+
+    // Total lintel length (for reinforcement) = sum of (opening width + 2×overhang)
+    const totalLintelLength = openings.reduce((sum, o) => {
+        const lintelSpanM = (o.width / 1000) + (2 * lintelOverhangM);
+        return sum + lintelSpanM;
+    }, 0);
 
     // --- Block Count ---
     // Block Volume (including mortar for determining "Unit Volume" occupied)
@@ -312,11 +339,10 @@ export const calculateEstimates = (
     const paintArea = netArea * 2;
 
     // Lintel (Concrete & Steel)
-    const totalLintelLen = effectiveLen9 + effectiveLen6;
     const concreteVolume = lintelVol9 + lintelVol6;
-    const reinforcementMainLength = totalLintelLen * settings.mainBarCount;
+    const reinforcementMainLength = totalLintelLength * settings.mainBarCount;
     const stirrupPerimeter = (thick9 + lintelDepthM) * 2; // Approx using 9" width
-    const stirrupCount = Math.ceil(totalLintelLen / 0.2);
+    const stirrupCount = Math.ceil(totalLintelLength / 0.2);
     const reinforcementStirrupLength = stirrupCount * stirrupPerimeter;
 
     // Mortar

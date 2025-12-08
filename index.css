@@ -40,572 +40,548 @@
   --text-primary: #ffffff;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
-  --border-primary: #334155;
-  --border-secondary: rgba(255, 255, 255, 0.1);
-  --canvas-bg: #1a1a2e;
-  --canvas-grid: rgba(255, 255, 255, 0.05);
-}
+  ========================================*/
 
-/* Light Theme */
-.light-theme {
-  --bg-primary: #f8fafc;
-  --bg-secondary: #e2e8f0;
-  --bg-tertiary: #cbd5e1;
-  --bg-card: rgba(255, 255, 255, 0.9);
-  --bg-input: #ffffff;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --border-primary: #cbd5e1;
-  --border-secondary: rgba(0, 0, 0, 0.1);
-  --canvas-bg: #f1f5f9;
-  --canvas-grid: rgba(0, 0, 0, 0.05);
-}
+  /* Disable text selection on interactive elements */
+  button,
+  [role="button"],
+  .no-select {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
 
-/* ========================================
-   2. GLOBAL TOUCH & INTERACTION IMPROVEMENTS
-   ======================================== */
+  /* Touch-action optimization for canvas */
+  .touch-canvas {
+    touch-action: none;
+    -webkit-touch-callout: none;
+  }
 
-/* Disable text selection on interactive elements */
-button,
-[role="button"],
-.no-select {
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
+  /* Smooth scrolling everywhere */
+  * {
+    scroll-behavior: smooth;
+  }
 
-/* Touch-action optimization for canvas */
-.touch-canvas {
-  touch-action: none;
-  -webkit-touch-callout: none;
-}
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 
-/* Smooth scrolling everywhere */
-* {
-  scroll-behavior: smooth;
-}
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 
-/* Hide scrollbar but keep functionality */
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
-
-/* ========================================
+  /* ========================================
    3. BUTTON & INTERACTIVE ELEMENT ANIMATIONS
    ======================================== */
 
-/* Universal button press animation */
-button,
-[role="button"],
-.interactive {
-  transition:
-    transform var(--duration-fast) var(--ease-bounce),
-    box-shadow var(--duration-fast) var(--ease-smooth),
-    background-color var(--duration-fast) var(--ease-smooth);
-  will-change: transform;
-}
-
-button:active,
-[role="button"]:active,
-.interactive:active {
-  transform: scale(0.95);
-}
-
-/* Toolbar tool buttons - enhanced feedback */
-.tool-btn {
-  position: relative;
-  overflow: hidden;
-}
-
-.tool-btn::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, transparent 70%);
-  opacity: 0;
-  transform: scale(0);
-  transition:
-    opacity var(--duration-fast),
-    transform var(--duration-normal) var(--ease-bounce);
-}
-
-.tool-btn:active::after {
-  opacity: 1;
-  transform: scale(2);
-}
-
-/* Active tool indicator pulse */
-.tool-active {
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-@keyframes pulse-glow {
-
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+  /* Universal button press animation */
+  button,
+  [role="button"],
+  .interactive {
+    transition:
+      transform var(--duration-fast) var(--ease-bounce),
+      box-shadow var(--duration-fast) var(--ease-smooth),
+      background-color var(--duration-fast) var(--ease-smooth);
+    will-change: transform;
   }
 
-  50% {
-    box-shadow: 0 0 20px 5px rgba(34, 197, 94, 0.6);
+  button:active,
+  [role="button"]:active,
+  .interactive:active {
+    transform: scale(0.95);
   }
-}
 
-/* ========================================
+  /* Toolbar tool buttons - enhanced feedback */
+  .tool-btn {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tool-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, transparent 70%);
+    opacity: 0;
+    transform: scale(0);
+    transition:
+      opacity var(--duration-fast),
+      transform var(--duration-normal) var(--ease-bounce);
+  }
+
+  .tool-btn:active::after {
+    opacity: 1;
+    transform: scale(2);
+  }
+
+  /* Active tool indicator pulse */
+  .tool-active {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-glow {
+
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+    }
+
+    50% {
+      box-shadow: 0 0 20px 5px rgba(34, 197, 94, 0.6);
+    }
+  }
+
+  /* ========================================
    4. LOADING & PROGRESS ANIMATIONS
    ======================================== */
 
-/* Skeleton loading shimmer */
-.skeleton {
-  background: linear-gradient(90deg,
-      rgba(255, 255, 255, 0.05) 0%,
-      rgba(255, 255, 255, 0.15) 50%,
-      rgba(255, 255, 255, 0.05) 100%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: 200% 0;
+  /* Skeleton loading shimmer */
+  .skeleton {
+    background: linear-gradient(90deg,
+        rgba(255, 255, 255, 0.05) 0%,
+        rgba(255, 255, 255, 0.15) 50%,
+        rgba(255, 255, 255, 0.05) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
   }
 
-  100% {
-    background-position: -200% 0;
-  }
-}
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
 
-/* Analyzing spinner with pulsing */
-.analyzing-spinner {
-  animation: spin 1s linear infinite, pulse-size 2s ease-in-out infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
+    100% {
+      background-position: -200% 0;
+    }
   }
 
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes pulse-size {
-
-  0%,
-  100% {
-    transform: rotate(0deg) scale(1);
+  /* Analyzing spinner with pulsing */
+  .analyzing-spinner {
+    animation: spin 1s linear infinite, pulse-size 2s ease-in-out infinite;
   }
 
-  50% {
-    transform: rotate(180deg) scale(1.1);
-  }
-}
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
 
-/* ========================================
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes pulse-size {
+
+    0%,
+    100% {
+      transform: rotate(0deg) scale(1);
+    }
+
+    50% {
+      transform: rotate(180deg) scale(1.1);
+    }
+  }
+
+  /* ========================================
    5. SUCCESS & FEEDBACK ANIMATIONS
    ======================================== */
 
-/* Checkmark success animation */
-.success-check {
-  animation: check-pop 0.4s var(--ease-bounce);
-}
-
-@keyframes check-pop {
-  0% {
-    transform: scale(0) rotate(-45deg);
-    opacity: 0;
+  /* Checkmark success animation */
+  .success-check {
+    animation: check-pop 0.4s var(--ease-bounce);
   }
 
-  50% {
-    transform: scale(1.2) rotate(0deg);
+  @keyframes check-pop {
+    0% {
+      transform: scale(0) rotate(-45deg);
+      opacity: 0;
+    }
+
+    50% {
+      transform: scale(1.2) rotate(0deg);
+    }
+
+    100% {
+      transform: scale(1) rotate(0deg);
+      opacity: 1;
+    }
   }
 
-  100% {
-    transform: scale(1) rotate(0deg);
-    opacity: 1;
-  }
-}
-
-/* Number count up animation */
-.count-up {
-  animation: count-pop 0.3s var(--ease-bounce);
-}
-
-@keyframes count-pop {
-  0% {
-    transform: scale(0.8);
-    opacity: 0;
+  /* Number count up animation */
+  .count-up {
+    animation: count-pop 0.3s var(--ease-bounce);
   }
 
-  50% {
-    transform: scale(1.1);
+  @keyframes count-pop {
+    0% {
+      transform: scale(0.8);
+      opacity: 0;
+    }
+
+    50% {
+      transform: scale(1.1);
+    }
+
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
 
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-/* Toast notification slide in */
-.toast-enter {
-  animation: toast-slide-in 0.3s var(--ease-bounce);
-}
-
-@keyframes toast-slide-in {
-  0% {
-    transform: translateY(100%) scale(0.9);
-    opacity: 0;
+  /* Toast notification slide in */
+  .toast-enter {
+    animation: toast-slide-in 0.3s var(--ease-bounce);
   }
 
-  100% {
-    transform: translateY(0) scale(1);
-    opacity: 1;
-  }
-}
+  @keyframes toast-slide-in {
+    0% {
+      transform: translateY(100%) scale(0.9);
+      opacity: 0;
+    }
 
-/* ========================================
+    100% {
+      transform: translateY(0) scale(1);
+      opacity: 1;
+    }
+  }
+
+  /* ========================================
    6. MOBILE-SPECIFIC LAYOUTS
    ======================================== */
 
-/* Bottom sheet animation */
-.bottom-sheet {
-  animation: sheet-up 0.3s var(--ease-smooth);
-}
-
-@keyframes sheet-up {
-  from {
-    transform: translateY(100%);
+  /* Bottom sheet animation */
+  .bottom-sheet {
+    animation: sheet-up 0.3s var(--ease-smooth);
   }
 
-  to {
-    transform: translateY(0);
-  }
-}
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
 
-/* Fullscreen modal for mobile */
-@media (max-width: 768px) {
-  .modal-mobile-full {
-    position: fixed !important;
-    inset: 0 !important;
-    max-width: 100% !important;
-    max-height: 100% !important;
-    border-radius: 0 !important;
-    padding-top: calc(var(--safe-area-inset-top) + 16px) !important;
-    padding-bottom: calc(var(--safe-area-inset-bottom) + 16px) !important;
+    to {
+      transform: translateY(0);
+    }
   }
 
-  /* Larger touch targets on mobile */
-  button,
-  [role="button"] {
-    min-height: var(--touch-target-min);
-    min-width: var(--touch-target-min);
+  /* Fullscreen modal for mobile */
+  @media (max-width: 768px) {
+    .modal-mobile-full {
+      position: fixed !important;
+      inset: 0 !important;
+      max-width: 100% !important;
+      max-height: 100% !important;
+      border-radius: 0 !important;
+      padding-top: calc(var(--safe-area-inset-top) + 16px) !important;
+      padding-bottom: calc(var(--safe-area-inset-bottom) + 16px) !important;
+    }
+
+    /* Larger touch targets on mobile */
+    button,
+    [role="button"] {
+      min-height: var(--touch-target-min);
+      min-width: var(--touch-target-min);
+    }
+
+    /* Floating action button */
+    .fab {
+      position: fixed;
+      bottom: calc(var(--safe-area-inset-bottom) + 80px);
+      right: 16px;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      z-index: 50;
+    }
   }
 
-  /* Floating action button */
-  .fab {
-    position: fixed;
-    bottom: calc(var(--safe-area-inset-bottom) + 80px);
-    right: 16px;
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    z-index: 50;
-  }
-}
-
-/* ========================================
+  /* ========================================
    7. DRAWING CANVAS ENHANCEMENTS
    ======================================== */
 
-/* Wall preview pulse while drawing */
-.wall-preview {
-  stroke-dasharray: 10 5;
-  animation: wall-dash 0.5s linear infinite;
-}
-
-@keyframes wall-dash {
-  to {
-    stroke-dashoffset: -15;
-  }
-}
-
-/* Point placement indicator */
-.point-indicator {
-  animation: point-pulse 1s ease-in-out infinite;
-}
-
-@keyframes point-pulse {
-
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
+  /* Wall preview pulse while drawing */
+  .wall-preview {
+    stroke-dasharray: 10 5;
+    animation: wall-dash 0.5s linear infinite;
   }
 
-  50% {
-    transform: scale(1.5);
-    opacity: 0.5;
-  }
-}
-
-/* Snap indicator flash */
-.snap-indicator {
-  animation: snap-flash 0.2s ease-out;
-}
-
-@keyframes snap-flash {
-  0% {
-    transform: scale(2);
-    opacity: 0;
+  @keyframes wall-dash {
+    to {
+      stroke-dashoffset: -15;
+    }
   }
 
-  50% {
-    opacity: 1;
+  /* Point placement indicator */
+  .point-indicator {
+    animation: point-pulse 1s ease-in-out infinite;
   }
 
-  100% {
-    transform: scale(1);
-    opacity: 0.8;
-  }
-}
+  @keyframes point-pulse {
 
-/* ========================================
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+
+    50% {
+      transform: scale(1.5);
+      opacity: 0.5;
+    }
+  }
+
+  /* Snap indicator flash */
+  .snap-indicator {
+    animation: snap-flash 0.2s ease-out;
+  }
+
+  @keyframes snap-flash {
+    0% {
+      transform: scale(2);
+      opacity: 0;
+    }
+
+    50% {
+      opacity: 1;
+    }
+
+    100% {
+      transform: scale(1);
+      opacity: 0.8;
+    }
+  }
+
+  /* ========================================
    8. HAPTIC-LIKE VISUAL FEEDBACK
    ======================================== */
 
-/* Vibration effect (visual substitute for haptic) */
-.haptic-feedback {
-  animation: haptic 0.1s linear;
-}
-
-@keyframes haptic {
-
-  0%,
-  100% {
-    transform: translateX(0);
+  /* Vibration effect (visual substitute for haptic) */
+  .haptic-feedback {
+    animation: haptic 0.1s linear;
   }
 
-  25% {
-    transform: translateX(-2px);
+  @keyframes haptic {
+
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+
+    25% {
+      transform: translateX(-2px);
+    }
+
+    75% {
+      transform: translateX(2px);
+    }
   }
 
-  75% {
-    transform: translateX(2px);
-  }
-}
-
-/* Success vibration pattern */
-.haptic-success {
-  animation: haptic-success 0.3s ease-out;
-}
-
-@keyframes haptic-success {
-  0% {
-    transform: scale(1);
+  /* Success vibration pattern */
+  .haptic-success {
+    animation: haptic-success 0.3s ease-out;
   }
 
-  25% {
-    transform: scale(1.02);
+  @keyframes haptic-success {
+    0% {
+      transform: scale(1);
+    }
+
+    25% {
+      transform: scale(1.02);
+    }
+
+    50% {
+      transform: scale(0.98);
+    }
+
+    75% {
+      transform: scale(1.01);
+    }
+
+    100% {
+      transform: scale(1);
+    }
   }
 
-  50% {
-    transform: scale(0.98);
-  }
-
-  75% {
-    transform: scale(1.01);
-  }
-
-  100% {
-    transform: scale(1);
-  }
-}
-
-/* ========================================
+  /* ========================================
    9. SIDEBAR & RESULTS PANEL
    ======================================== */
 
-/* Slide in from right */
-.slide-in-right {
-  animation: slide-right 0.3s var(--ease-smooth);
-}
-
-@keyframes slide-right {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
+  /* Slide in from right */
+  .slide-in-right {
+    animation: slide-right 0.3s var(--ease-smooth);
   }
 
-  to {
-    transform: translateX(0);
-    opacity: 1;
+  @keyframes slide-right {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
   }
-}
 
-/* Metric card hover/tap */
-.metric-card {
-  transition:
-    transform var(--duration-fast) var(--ease-bounce),
-    box-shadow var(--duration-fast);
-}
+  /* Metric card hover/tap */
+  .metric-card {
+    transition:
+      transform var(--duration-fast) var(--ease-bounce),
+      box-shadow var(--duration-fast);
+  }
 
-.metric-card:hover,
-.metric-card:active {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-}
+  .metric-card:hover,
+  .metric-card:active {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  }
 
-/* Block count emphasis */
-.block-count {
-  background: linear-gradient(135deg, #22c55e, #16a34a);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  font-weight: 800;
-  font-size: 2rem;
-}
+  /* Block count emphasis */
+  .block-count {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-weight: 800;
+    font-size: 2rem;
+  }
 
-/* ========================================
+  /* ========================================
    10. ONBOARDING & TUTORIAL
    ======================================== */
 
-/* Spotlight effect for tutorials */
-.spotlight {
-  position: fixed;
-  inset: 0;
-  background: radial-gradient(circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%),
-      transparent 0%,
-      transparent 80px,
-      rgba(0, 0, 0, 0.8) 120px);
-  pointer-events: none;
-  z-index: 100;
-}
-
-/* Tooltip pointer animation */
-.tooltip-bounce {
-  animation: tooltip-bounce 1s ease-in-out infinite;
-}
-
-@keyframes tooltip-bounce {
-
-  0%,
-  100% {
-    transform: translateY(0);
+  /* Spotlight effect for tutorials */
+  .spotlight {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%),
+        transparent 0%,
+        transparent 80px,
+        rgba(0, 0, 0, 0.8) 120px);
+    pointer-events: none;
+    z-index: 100;
   }
 
-  50% {
-    transform: translateY(-8px);
-  }
-}
-
-/* Step progress indicator */
-.step-complete {
-  animation: step-complete 0.5s var(--ease-bounce);
-}
-
-@keyframes step-complete {
-  0% {
-    transform: scale(0);
+  /* Tooltip pointer animation */
+  .tooltip-bounce {
+    animation: tooltip-bounce 1s ease-in-out infinite;
   }
 
-  50% {
-    transform: scale(1.2);
+  @keyframes tooltip-bounce {
+
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+
+    50% {
+      transform: translateY(-8px);
+    }
   }
 
-  100% {
-    transform: scale(1);
+  /* Step progress indicator */
+  .step-complete {
+    animation: step-complete 0.5s var(--ease-bounce);
   }
-}
 
-/* ========================================
+  @keyframes step-complete {
+    0% {
+      transform: scale(0);
+    }
+
+    50% {
+      transform: scale(1.2);
+    }
+
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  /* ========================================
    11. WALL TYPE TOGGLE ENHANCEMENT
    ======================================== */
 
-.wall-type-toggle {
-  transition: all var(--duration-fast) var(--ease-bounce);
-}
+  .wall-type-toggle {
+    transition: all var(--duration-fast) var(--ease-bounce);
+  }
 
-.wall-type-toggle:active {
-  transform: scale(0.92);
-}
+  .wall-type-toggle:active {
+    transform: scale(0.92);
+  }
 
-.wall-type-external {
-  background: linear-gradient(135deg, #22c55e, #15803d);
-  box-shadow: var(--shadow-glow-green);
-}
+  .wall-type-external {
+    background: linear-gradient(135deg, #22c55e, #15803d);
+    box-shadow: var(--shadow-glow-green);
+  }
 
-.wall-type-partition {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  box-shadow: var(--shadow-glow-amber);
-}
+  .wall-type-partition {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    box-shadow: var(--shadow-glow-amber);
+  }
 
-/* ========================================
+  /* ========================================
    12. DARK MODE ENHANCEMENTS
    ======================================== */
 
-/* Glassmorphism cards */
-.glass {
-  background: rgba(30, 41, 59, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
+  /* Glassmorphism cards */
+  .glass {
+    background: rgba(30, 41, 59, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
 
-/* Gradient borders */
-.gradient-border {
-  position: relative;
-}
+  /* Gradient borders */
+  .gradient-border {
+    position: relative;
+  }
 
-.gradient-border::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  padding: 1px;
-  border-radius: inherit;
-  background: linear-gradient(135deg, #22c55e, #3b82f6);
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-}
+  .gradient-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: linear-gradient(135deg, #22c55e, #3b82f6);
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
 
-/* ========================================
+  /* ========================================
    13. ACCESSIBILITY IMPROVEMENTS
    ======================================== */
 
-/* Focus visible ring */
-:focus-visible {
-  outline: 2px solid #3b82f6;
-  outline-offset: 2px;
-}
-
-/* Reduced motion preference */
-@media (prefers-reduced-motion: reduce) {
-
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+  /* Focus visible ring */
+  :focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
   }
-}
 
-/* High contrast mode */
-@media (prefers-contrast: high) {
-  .glass {
-    background: rgba(0, 0, 0, 0.9);
-    border: 2px solid white;
+  /* Reduced motion preference */
+  @media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
-}
+
+  /* High contrast mode */
+  @media (prefers-contrast: high) {
+    .glass {
+      background: rgba(0, 0, 0, 0.9);
+      border: 2px solid white;
+    }
+  }

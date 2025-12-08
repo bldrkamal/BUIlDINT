@@ -77,6 +77,7 @@ const App: React.FC = () => {
     lintelOverhang: 150,
     lintelWidth: 225, // mm - typically matches wall thickness
     lintelDepth: 225, // mm - section depth/height
+    deductLintelFromBlocks: false, // Default OFF - lintel sits on top of blocks in Nigerian construction
     mainBarDiameter: 12,
     mainBarCount: 4,
     stirrupBarDiameter: 8,

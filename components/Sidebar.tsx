@@ -64,12 +64,13 @@ const Sidebar: React.FC<SidebarProps> = ({
         />
       )}
 
-      <div className={`slide-in-right glass absolute right-0 top-0 h-full border-l border-slate-800 shadow-2xl transition-transform duration-300 flex flex-col z-40 ${isOpen ? 'translate-x-0' : 'translate-x-full'} w-[85vw] md:w-96`}>
+      <div className={`slide-in-right absolute right-0 top-0 h-full shadow-2xl transition-transform duration-300 flex flex-col z-40 ${isOpen ? 'translate-x-0' : 'translate-x-full'} w-[85vw] md:w-96`} style={{ background: 'var(--bg-secondary)', borderLeft: '1px solid var(--border-primary)' }}>
 
         {/* Desktop Toggle Button */}
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="hidden md:flex absolute -left-8 top-1/2 transform -translate-y-1/2 bg-slate-800 p-1 rounded-l-md border-y border-l border-slate-700 text-slate-400 hover:text-brand-500 active:scale-95 transition-transform"
+          className="hidden md:flex absolute -left-8 top-1/2 transform -translate-y-1/2 p-1 rounded-l-md active:scale-95 transition-transform"
+          style={{ background: 'var(--bg-tertiary)', borderTop: '1px solid var(--border-primary)', borderBottom: '1px solid var(--border-primary)', borderLeft: '1px solid var(--border-primary)', color: 'var(--text-secondary)' }}
         >
           {isOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
         </button>
@@ -77,14 +78,15 @@ const Sidebar: React.FC<SidebarProps> = ({
         {/* Fixed Header */}
         <div className="p-6 pb-0 flex justify-between items-start shrink-0">
           <div>
-            <h2 className="text-xl font-bold text-white tracking-tight">
+            <h2 className="text-xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
               Your Estimate
             </h2>
-            <p className="text-slate-400 text-sm mt-1">Material Quantities</p>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Material Quantities</p>
           </div>
           <button
             onClick={() => setIsOpen(false)}
-            className="md:hidden text-slate-400 p-1 active:scale-90 transition-transform"
+            className="md:hidden p-1 active:scale-90 transition-transform"
+            style={{ color: 'var(--text-secondary)' }}
           >
             <X size={24} />
           </button>
@@ -374,6 +376,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                       className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
                     />
                   </div>
+                </div>
+
+                {/* Lintel Deduction Toggle */}
+                <div className="mt-3 flex items-center justify-between">
+                  <div>
+                    <span className="text-sm text-slate-300">Deduct Lintel from Blocks</span>
+                    <p className="text-xs text-slate-500">Turn OFF if lintel sits on top of blocks</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.deductLintelFromBlocks ?? false}
+                      onChange={(e) => onUpdateSettings({ ...settings, deductLintelFromBlocks: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-brand-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600"></div>
+                  </label>
                 </div>
               </div>
 
